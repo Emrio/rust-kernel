@@ -12,7 +12,7 @@ x86_64 = "0.15.4"
 
 [[bin]]
 name = "rust-kernel"
-test = false
+test = true
 bench = false
 
 [package.metadata.bootimage]
@@ -27,3 +27,5 @@ run-command = [
   "-display",
   "none",
 ]
+test-success-exit-code = 33
+test-timeout = 300

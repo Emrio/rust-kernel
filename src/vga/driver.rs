@@ -32,23 +32,23 @@ impl ColorCode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
-struct ScreenChar {
-    ascii_character: u8,
+pub(crate) struct ScreenChar {
+    pub(crate) ascii_character: u8,
     color_code: ColorCode,
 }
 
-const BUFFER_HEIGHT: usize = 25;
-const BUFFER_WIDTH: usize = 80;
+pub(crate) const BUFFER_HEIGHT: usize = 25;
+pub(crate) const BUFFER_WIDTH: usize = 80;
 
 #[repr(transparent)]
 pub struct Buffer {
-    chars: [[ScreenChar; BUFFER_WIDTH]; BUFFER_HEIGHT],
+    pub(crate) chars: [[ScreenChar; BUFFER_WIDTH]; BUFFER_HEIGHT],
 }
 
 pub struct Writer<'a> {
     column_position: usize,
     color_code: ColorCode,
-    buffer: &'a mut Buffer,
+    pub(crate) buffer: &'a mut Buffer,
 }
 
 impl<'a> Writer<'a> {

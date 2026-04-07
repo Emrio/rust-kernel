@@ -18,3 +18,6 @@ lazy_static! {
             &mut *(0xb8000 as *mut Buffer)
         }));
 }
+
+#[cfg(test)]
+mod tests;
