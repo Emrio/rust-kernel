@@ -1,12 +1,7 @@
 #![no_std]
 #![no_main]
 
-use core::panic::PanicInfo;
-
-#[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
-    loop {}
-}
+mod panic;
 
 static HELLO: &[u8] = b"Hello World!";
 
