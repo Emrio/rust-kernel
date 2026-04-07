@@ -2,8 +2,9 @@
 #![no_main]
 
 #[macro_use]
-mod kprintln;
+mod kprint;
 mod panic;
+mod serial;
 mod vga;
 
 #[unsafe(no_mangle)]

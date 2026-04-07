@@ -1,3 +1,7 @@
+use core::fmt::Write;
+
+use crate::serial::SERIAL1;
+
 #[macro_export]
 macro_rules! kprintln {
     () => (kprint!("\n"));
@@ -6,12 +10,13 @@ macro_rules! kprintln {
 
 #[macro_export]
 macro_rules! kprint {
-    ($($arg:tt)*) => ($crate::kprintln::_print(format_args!($($arg)*)));
+    ($($arg:tt)*) => ($crate::kprint::_print(format_args!($($arg)*)));
 }
 
 #[doc(hidden)]
 pub fn _print(args: core::fmt::Arguments) {
-    use crate::vga::WRITER;
-    use core::fmt::Write;
-    WRITER.lock().write_fmt(args).unwrap();
+    SERIAL1
+        .lock()
+        .write_fmt(args)
+        .expect("Printing to serial failed");
 }

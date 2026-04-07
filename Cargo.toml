@@ -7,8 +7,20 @@ edition = "2024"
 bootloader = "0.9"
 lazy_static = { version = "1.5.0", features = ["spin_no_std"] }
 spin = "0.10.0"
+uart_16550 = "0.6.0"
 
 [[bin]]
 name = "rust-kernel"
 test = false
 bench = false
+
+[package.metadata.bootimage]
+run-command = [
+  "qemu-system-x86_64",
+  "-drive",
+  "format=raw,file={}",
+  "-serial",
+  "stdio",
+  "-display",
+  "none",
+]
