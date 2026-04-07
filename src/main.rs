@@ -1,9 +1,12 @@
 #![no_std]
 #![no_main]
 
+use crate::qemu::exit::{QemuExitCode, exit_qemu};
+
 #[macro_use]
 mod kprint;
 mod panic;
+mod qemu;
 mod serial;
 mod vga;
 
@@ -11,5 +14,5 @@ mod vga;
 pub extern "C" fn _start() -> ! {
     kprintln!("Hello World{}", "!");
 
-    loop {}
+    exit_qemu(QemuExitCode::Success)
 }
