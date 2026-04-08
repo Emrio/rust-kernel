@@ -7,3 +7,6 @@ target = "x86_64-unknown-none"
 [target.x86_64-unknown-none]
 runner = "bootimage runner"
 rustflags = ["-C", "relocation-model=static"]
+
+[alias]
+t = "test --features kprint-vga"

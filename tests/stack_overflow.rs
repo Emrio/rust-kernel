@@ -5,15 +5,13 @@
 use core::panic::PanicInfo;
 
 use lazy_static::lazy_static;
-use rust_kernel::{
-    kprint, kprintln,
-    qemu::exit::{QemuExitCode, exit_qemu},
-};
+use rust_kernel::qemu::exit::{QemuExitCode, exit_qemu};
+use rust_kernel::{test_print, test_println};
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {
-    kprint!("stack_overflow::stack_overflow...\t");
+    test_print!("stack_overflow::stack_overflow...\t");
 
     rust_kernel::gdt::init();
     init_test_idt();
@@ -33,6 +31,8 @@ fn stack_overflow() {
     unsafe { x.read_volatile() };
 }
 
+// because we are testing kernel stack overflow behaviour,
+// this panic is actually never called even with unloaded IDT.
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     rust_kernel::tests::test_panic_handler(info)
@@ -58,6 +58,6 @@ extern "x86-interrupt" fn test_double_fault_handler(
     _stack_frame: InterruptStackFrame,
     _error_code: u64,
 ) -> ! {
-    kprintln!("[ok]");
+    test_println!("[ok]");
     exit_qemu(QemuExitCode::Success);
 }
