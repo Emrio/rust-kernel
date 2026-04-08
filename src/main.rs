@@ -5,8 +5,7 @@
 #![reexport_test_harness_main = "test_main"]
 
 use core::panic::PanicInfo;
-use rust_kernel::qemu::exit::{QemuExitCode, exit_qemu};
-use rust_kernel::{init, kprintln};
+use rust_kernel::{hlt_loop, init, kprintln};
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {
@@ -17,12 +16,13 @@ pub extern "C" fn _start() -> ! {
     #[cfg(test)]
     test_main();
 
-    exit_qemu(QemuExitCode::Success)
+    hlt_loop()
 }
 
 #[cfg(not(test))]
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
+    use rust_kernel::qemu::exit::{QemuExitCode, exit_qemu};
     kprintln!("{}", info);
     exit_qemu(QemuExitCode::Failed)
 }

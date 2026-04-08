@@ -6,13 +6,13 @@
 
 use core::panic::PanicInfo;
 
-use rust_kernel::kprintln;
+use rust_kernel::{hlt_loop, kprintln};
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {
     test_main();
 
-    loop {}
+    hlt_loop()
 }
 
 #[allow(dead_code)]

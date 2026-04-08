@@ -15,6 +15,6 @@ pub mod exit {
             let mut port = Port::new(0xf4);
             port.write(exit_code as u32);
         }
-        loop {}
+        crate::hlt_loop()
     }
 }

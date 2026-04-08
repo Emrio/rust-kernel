@@ -44,5 +44,5 @@ fn panic(info: &PanicInfo) -> ! {
 pub extern "C" fn _start() -> ! {
     super::init();
     super::test_main();
-    loop {}
+    super::hlt_loop()
 }
