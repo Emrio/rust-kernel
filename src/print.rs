@@ -20,20 +20,24 @@ macro_rules! kprint {
 pub fn _print_serial(args: core::fmt::Arguments) {
     use crate::serial::SERIAL1;
     use core::fmt::Write;
-    SERIAL1
-        .lock()
-        .write_fmt(args)
-        .expect("Printing to serial failed");
+    x86_64::instructions::interrupts::without_interrupts(|| {
+        SERIAL1
+            .lock()
+            .write_fmt(args)
+            .expect("Printing to serial failed");
+    })
 }
 
 #[doc(hidden)]
 pub fn _print_vga(args: core::fmt::Arguments) {
     use crate::vga::WRITER;
     use core::fmt::Write;
-    WRITER
-        .lock()
-        .write_fmt(args)
-        .expect("Printing to vga failed");
+    x86_64::instructions::interrupts::without_interrupts(|| {
+        WRITER
+            .lock()
+            .write_fmt(args)
+            .expect("Printing to vga failed");
+    })
 }
 
 // used by test framework
