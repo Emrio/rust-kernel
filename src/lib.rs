@@ -7,6 +7,7 @@
 
 #[macro_use]
 pub mod print;
+pub mod gdt;
 pub mod interrupts;
 pub mod qemu;
 pub mod serial;
@@ -14,5 +15,6 @@ pub mod tests;
 pub mod vga;
 
 pub fn init() {
+    gdt::init();
     interrupts::init_idt();
 }
