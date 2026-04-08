@@ -5,13 +5,13 @@
 #![reexport_test_harness_main = "test_main"]
 
 use core::panic::PanicInfo;
-use rust_kernel::{
-    kprintln,
-    qemu::exit::{QemuExitCode, exit_qemu},
-};
+use rust_kernel::qemu::exit::{QemuExitCode, exit_qemu};
+use rust_kernel::{init, kprintln};
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {
+    init();
+
     kprintln!("Hello World{}", "!");
 
     #[cfg(test)]
