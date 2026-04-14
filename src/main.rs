@@ -4,11 +4,13 @@
 #![test_runner(rust_kernel::tests::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
+use bootloader::{BootInfo, entry_point};
 use core::panic::PanicInfo;
 use rust_kernel::{hlt_loop, init, kprintln};
 
-#[unsafe(no_mangle)]
-pub extern "C" fn _start() -> ! {
+entry_point!(kmain);
+
+fn kmain(boot_info: &'static BootInfo) -> ! {
     init();
 
     kprintln!("Hello World{}", "!");
