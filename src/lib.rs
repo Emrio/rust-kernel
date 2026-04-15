@@ -7,8 +7,11 @@
 
 #[macro_use]
 pub mod print;
+pub mod bits;
+pub mod drivers;
 pub mod gdt;
 pub mod interrupts;
+pub mod pci;
 pub mod qemu;
 pub mod serial;
 pub mod tests;

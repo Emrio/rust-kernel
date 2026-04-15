@@ -15,6 +15,10 @@ fn kmain(boot_info: &'static BootInfo) -> ! {
 
     kprintln!("Hello World{}", "!");
 
+    rust_kernel::drivers::i82540em::find_and_setup_ethernet_controller(
+        boot_info.physical_memory_offset,
+    );
+
     #[cfg(test)]
     test_main();
 
