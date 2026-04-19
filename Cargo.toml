@@ -32,6 +32,9 @@ run-command = [
   "user,id=n",
   "-device",
   "e1000,netdev=n",
+  # Dump all network traffic to ease up debugging
+  "-object",
+  "filter-dump,id=f1,netdev=n,file=/tmp/eth.pcap",
 ]
 test-success-exit-code = 33
 test-timeout = 300

@@ -6,7 +6,7 @@
 
 use bootloader::{BootInfo, entry_point};
 use core::panic::PanicInfo;
-use rust_kernel::{hlt_loop, init, kprintln};
+use rust_kernel::{hlt_loop, init, kprintln, memory::MemoryMapper};
 
 entry_point!(kmain);
 
@@ -15,9 +15,9 @@ fn kmain(boot_info: &'static BootInfo) -> ! {
 
     kprintln!("Hello World{}", "!");
 
-    rust_kernel::drivers::i82540em::find_and_setup_ethernet_controller(
-        boot_info.physical_memory_offset,
-    );
+    let mapper = unsafe { MemoryMapper::new(boot_info.physical_memory_offset) };
+
+    rust_kernel::drivers::i82540em::find_and_setup_ethernet_controller(&mapper);
 
     #[cfg(test)]
     test_main();

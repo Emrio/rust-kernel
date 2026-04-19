@@ -1,10 +1,12 @@
+use crate::memory::MemoryMapper;
+
 pub struct Device {
     base_address: *mut u32,
 }
 
 impl Device {
-    pub(super) fn from(memory_offset: u64, bar0: u32) -> Self {
-        let base_address = memory_offset + (bar0 & 0xfffffff8u32) as u64;
+    pub(super) fn from(mapper: &MemoryMapper, bar0: u32) -> Self {
+        let base_address = mapper.to_virt_mut((bar0 & 0xfffffff8u32) as u64);
 
         Self {
             base_address: base_address as *mut u32,
