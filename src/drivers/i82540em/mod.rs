@@ -1,12 +1,15 @@
 // https://www.intel.com/content/dam/doc/manual/pci-pci-x-family-gbe-controllers-software-dev-manual.pdf
 // https://wiki.osdev.org/Intel_8254x
 
+mod constants;
 mod device;
 mod hardware_address;
+mod rx;
 
 pub use device::Device as I82540EMEthernetController;
 use x86_64::instructions::hlt;
 
+use crate::drivers::i82540em::rx::{RX_DESCS, setup_rx};
 use crate::pci::{config_read_u32, find_device};
 
 use hardware_address::HardwareAddress;
@@ -36,7 +39,21 @@ fn setup_device(memory_offset: u64, bus: u8, device: u8) {
 
     reset_nic(&device);
 
-    // TODO: setup token rings
+    setup_rx(&device);
+
+    loop {
+        hlt();
+        hlt();
+        hlt();
+        hlt();
+        hlt();
+        kprintln!("a new loop");
+        unsafe {
+            kprintln!("{:#?}", *&raw const RX_DESCS);
+            // kprintln!("{:?}", *&raw const RX_BUFFERS);
+        }
+    }
+
     // TODO: setup interrupts
     // TODO: send and receive packets
 }

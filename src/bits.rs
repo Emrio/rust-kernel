@@ -3,6 +3,13 @@ pub trait Split {
     fn split(self) -> (Self::Output, Self::Output);
 }
 
+impl Split for u64 {
+    type Output = u32;
+    fn split(self) -> (u32, u32) {
+        ((self >> 32) as u32, (self & 0xffffffff) as u32)
+    }
+}
+
 impl Split for u32 {
     type Output = u16;
     fn split(self) -> (u16, u16) {
