@@ -4,9 +4,10 @@ use crate::drivers::i82540em::constants::{
     REG_RDLEN, REG_RDT,
 };
 use crate::drivers::i82540em::device::Device;
+use crate::memory::MemoryMapper;
 
 #[derive(Default, Clone, Copy, Debug)]
-#[repr(C)]
+#[repr(C, align(16))]
 pub struct RxDescriptor {
     buffer_address: u64,
     length: u16,
@@ -42,14 +43,14 @@ pub const PACKET_SIZE: usize = 4096;
 pub static mut RX_DESCS: [RxDescriptor; RX_SIZE] = [RxDescriptor::new(); RX_SIZE];
 pub static mut RX_BUFFERS: [[u8; PACKET_SIZE]; RX_SIZE] = [[0u8; PACKET_SIZE]; RX_SIZE];
 
-pub fn setup_rx(device: &Device) {
+pub fn setup_rx(device: &Device, mapper: &MemoryMapper) {
     for index in 0..RX_SIZE {
         unsafe {
-            RX_DESCS[index].buffer_address = &raw const RX_BUFFERS[index] as u64;
-        }
+            RX_DESCS[index].buffer_address = mapper.to_physical(&raw const RX_BUFFERS[index])
+        };
     }
 
-    let rx_desc_address = &raw mut RX_DESCS as u64;
+    let rx_desc_address = mapper.to_physical(&raw mut RX_DESCS);
     let (base_address_high, base_address_low) = rx_desc_address.split();
     device.write_register(REG_RDBAL, base_address_low);
     device.write_register(REG_RDBAH, base_address_high);

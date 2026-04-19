@@ -5,12 +5,15 @@ mod constants;
 mod device;
 mod hardware_address;
 mod rx;
+mod tx;
 
 pub use device::Device as I82540EMEthernetController;
 use x86_64::instructions::hlt;
 
 use crate::drivers::i82540em::rx::{RX_DESCS, setup_rx};
-use crate::pci::{config_read_u32, find_device};
+use crate::drivers::i82540em::tx::{send_packet, setup_tx};
+use crate::memory::MemoryMapper;
+use crate::pci::{config_read_u32, config_write_u32, find_device};
 
 use hardware_address::HardwareAddress;
 
@@ -24,22 +27,38 @@ const I8254_EERD_DONE: u32 = 1 << 4;
 const I8254_REG_RAL: usize = 0x5400;
 const I8254_REG_RAH: usize = 0x5404;
 
-pub fn find_and_setup_ethernet_controller(memory_offset: u64) {
+/// Bus Master Enable
+const PCI_COMMAND_BME: u32 = 1 << 2;
+
+pub fn find_and_setup_ethernet_controller(mapper: &MemoryMapper) {
     let Some((bus, device)) = find_device(ID) else {
         return;
     };
 
-    setup_device(memory_offset, bus, device);
+    setup_device(mapper, bus, device);
 }
 
-fn setup_device(memory_offset: u64, bus: u8, device: u8) {
+fn setup_device(mapper: &MemoryMapper, bus: u8, device: u8) {
     let bar0 = config_read_u32(bus, device, 0, 0x10);
 
-    let device = I82540EMEthernetController::from(memory_offset, bar0);
+    let eth_device = I82540EMEthernetController::from(mapper, bar0);
 
-    reset_nic(&device);
+    reset_nic(&eth_device);
 
-    setup_rx(&device);
+    let command = config_read_u32(bus, device, 0, 0x04);
+    config_write_u32(bus, device, 0, 0x04, command | PCI_COMMAND_BME);
+
+    setup_rx(&eth_device, mapper);
+    setup_tx(&eth_device, mapper);
+
+    send_packet(
+        &eth_device,
+        mapper,
+        &[
+            255, 255, 255, 255, 255, 255, 0, 17, 34, 51, 68, 85, 8, 6, 0, 1, 8, 0, 6, 4, 0, 1, 0,
+            17, 34, 51, 68, 85, 10, 0, 2, 3, 0, 0, 0, 0, 0, 0, 10, 0, 2, 2,
+        ],
+    );
 
     loop {
         hlt();
