@@ -3,19 +3,21 @@
 
 mod constants;
 mod device;
-mod hardware_address;
 mod rx;
 mod tx;
 
 pub use device::Device as I82540EMEthernetController;
 use x86_64::instructions::hlt;
 
-use crate::drivers::i82540em::rx::{RX_DESCS, setup_rx};
+use crate::drivers::i82540em::rx::{RX_BUFFERS, RX_DESCS, setup_rx};
 use crate::drivers::i82540em::tx::{send_packet, setup_tx};
 use crate::memory::MemoryMapper;
+use crate::net::arp::{ARP_PACKET, ARPOperation, ARPPacket, HardwareType, ProtocolType};
+use crate::net::ethernet::address::EthernetAddress;
+use crate::net::ethernet::ethertype::EtherType;
+use crate::net::ethernet::{ETHERNET_HEADER, EthernetFrame};
+use crate::net::l3_address::IPv4Address;
 use crate::pci::{config_read_u32, config_write_u32, find_device};
-
-use hardware_address::HardwareAddress;
 
 const ID: u32 = 0x100e_8086;
 const I8254_REG_CTRL: usize = 0x0;
@@ -43,13 +45,15 @@ fn setup_device(mapper: &MemoryMapper, bus: u8, device: u8) {
 
     let eth_device = I82540EMEthernetController::from(mapper, bar0);
 
-    reset_nic(&eth_device);
+    let hwaddr = reset_nic(&eth_device);
 
     let command = config_read_u32(bus, device, 0, 0x04);
     config_write_u32(bus, device, 0, 0x04, command | PCI_COMMAND_BME);
 
     setup_rx(&eth_device, mapper);
     setup_tx(&eth_device, mapper);
+
+    send_arp_request(&eth_device, mapper, hwaddr);
 
     send_packet(
         &eth_device,
@@ -60,16 +64,18 @@ fn setup_device(mapper: &MemoryMapper, bus: u8, device: u8) {
         ],
     );
 
-    loop {
+    for _ in 0..5 {
         hlt();
         hlt();
         hlt();
         hlt();
         hlt();
-        kprintln!("a new loop");
         unsafe {
-            kprintln!("{:#?}", *&raw const RX_DESCS);
+            // kprintln!("{:#?}", *&raw const RX_DESCS);
             // kprintln!("{:?}", *&raw const RX_BUFFERS);
+            if RX_DESCS[0].length != 0 {
+                process_arp_reply(&RX_BUFFERS[0]);
+            }
         }
     }
 
@@ -94,7 +100,7 @@ fn read_eeprom(device: &I82540EMEthernetController, address: u8) -> u16 {
     }
 }
 
-fn reset_nic(device: &I82540EMEthernetController) {
+fn reset_nic(device: &I82540EMEthernetController) -> EthernetAddress {
     let mut device_control = device.read_register(I8254_REG_CTRL);
     device_control |= I8254_CTRL_RESET;
     device.write_register(I8254_REG_CTRL, device_control);
@@ -111,9 +117,50 @@ fn reset_nic(device: &I82540EMEthernetController) {
     let b1 = read_eeprom(device, 1);
     let b2 = read_eeprom(device, 2);
 
-    let hwaddr = HardwareAddress::from(b0, b1, b2);
+    let hwaddr = EthernetAddress::from_u16(b0, b1, b2);
     kprintln!("{hwaddr}");
 
     device.write_register(I8254_REG_RAL, (b1 as u32) << 16 | (b0 as u32));
     device.write_register(I8254_REG_RAH, b2 as u32 | /* Address valid */ (1 << 31));
+
+    hwaddr
+}
+
+fn send_arp_request(
+    device: &I82540EMEthernetController,
+    mapper: &MemoryMapper,
+    hwaddr: EthernetAddress,
+) {
+    kprintln!("ARP Request:");
+
+    let mut packet = [0; ETHERNET_HEADER + ARP_PACKET];
+    let mut frame = EthernetFrame::new(&mut packet).unwrap();
+
+    frame
+        .set_destination(EthernetAddress::BROADCAST)
+        .set_source(hwaddr)
+        .set_ethertype(EtherType::ARP);
+    kprintln!("{}", frame);
+
+    let mut arp = ARPPacket::new(frame.payload_mut()).unwrap();
+    arp.set_hardware_type(HardwareType::Ethernet)
+        .set_protocol_type(ProtocolType::IPv4)
+        .set_hardware_length(EthernetAddress::SIZE as u8)
+        .set_protocol_length(IPv4Address::SIZE as u8)
+        .set_operation(ARPOperation::Request)
+        .set_sender_hardware_address(hwaddr)
+        .set_sender_protocol_address(IPv4Address::new(10, 0, 2, 3))
+        .set_target_hardware_address(EthernetAddress::BROADCAST)
+        .set_target_protocol_address(IPv4Address::new(10, 0, 2, 2));
+    kprintln!("{}", arp);
+
+    send_packet(device, mapper, frame.into_inner());
+}
+
+fn process_arp_reply(buffer: &[u8]) {
+    kprintln!("ARP Reply:");
+    let frame = EthernetFrame::new(buffer).unwrap();
+    kprintln!("{}", frame);
+    let arp = ARPPacket::new(frame.payload()).unwrap();
+    kprintln!("{}", arp);
 }

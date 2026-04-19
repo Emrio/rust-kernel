@@ -10,7 +10,7 @@ use crate::memory::MemoryMapper;
 #[repr(C, align(16))]
 pub struct RxDescriptor {
     buffer_address: u64,
-    length: u16,
+    pub(super) length: u16,
     checksum: u16,
     /// DD = Descriptor Done
     /// EOF = End Of Packet

@@ -1,47 +1,40 @@
 use crate::bits::Split;
 
-pub struct HardwareAddress(u8, u8, u8, u8, u8, u8);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EthernetAddress([u8; 6]);
 
-impl HardwareAddress {
-    pub fn from(b0: u16, b1: u16, b2: u16) -> Self {
+impl EthernetAddress {
+    pub const BROADCAST: EthernetAddress = EthernetAddress([0xff; 6]);
+    pub const SIZE: usize = core::mem::size_of::<EthernetAddress>();
+
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        let mut address = [0; 6];
+        address.copy_from_slice(bytes);
+        Self(address)
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+
+    pub fn from_u16(b0: u16, b1: u16, b2: u16) -> Self {
         let (a1, a0) = b0.split();
         let (a3, a2) = b1.split();
         let (a5, a4) = b2.split();
-        Self(a0, a1, a2, a3, a4, a5)
+        Self([a0, a1, a2, a3, a4, a5])
+    }
+
+    pub fn is_broadcast(&self) -> bool {
+        *self == EthernetAddress::BROADCAST
     }
 }
 
-impl core::fmt::Display for HardwareAddress {
+impl core::fmt::Display for EthernetAddress {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        if self.0 < 0x10 {
-            f.write_str("0")?
-        }
-        core::fmt::LowerHex::fmt(&self.0, f)?;
-        f.write_str(":")?;
-        if self.1 < 0x10 {
-            f.write_str("0")?
-        }
-        core::fmt::LowerHex::fmt(&self.1, f)?;
-        f.write_str(":")?;
-        if self.2 < 0x10 {
-            f.write_str("0")?
-        }
-        core::fmt::LowerHex::fmt(&self.2, f)?;
-        f.write_str(":")?;
-        if self.3 < 0x10 {
-            f.write_str("0")?
-        }
-        core::fmt::LowerHex::fmt(&self.3, f)?;
-        f.write_str(":")?;
-        if self.4 < 0x10 {
-            f.write_str("0")?
-        }
-        core::fmt::LowerHex::fmt(&self.4, f)?;
-        f.write_str(":")?;
-        if self.5 < 0x10 {
-            f.write_str("0")?
-        }
-        core::fmt::LowerHex::fmt(&self.5, f)?;
+        f.write_fmt(format_args!(
+            "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+            self.0[0], self.0[1], self.0[2], self.0[3], self.0[4], self.0[5]
+        ))?;
 
         Ok(())
     }
@@ -51,7 +44,7 @@ impl core::fmt::Display for HardwareAddress {
 mod tests {
     use core::fmt::Write;
 
-    use super::HardwareAddress;
+    use super::EthernetAddress;
 
     // FIXME: string allocation
     struct StringBuffer<const N: usize> {
@@ -83,7 +76,7 @@ mod tests {
 
     #[test_case]
     fn test_hw_addr_formatter() {
-        let addr = HardwareAddress::from(0x1234, 0x5678, 0x9abc);
+        let addr = EthernetAddress::from_u16(0x1234, 0x5678, 0x9abc);
 
         let mut buffer = StringBuffer::<17>::new();
         write!(buffer, "{}", addr).unwrap();
@@ -92,10 +85,21 @@ mod tests {
 
     #[test_case]
     fn test_hw_addr_low_digits() {
-        let addr = HardwareAddress::from(0x0102, 0x120a, 0x0fff);
+        let addr = EthernetAddress::from_u16(0x0102, 0x120a, 0x0fff);
 
         let mut buffer = StringBuffer::<17>::new();
         write!(buffer, "{}", addr).unwrap();
         assert_eq!(buffer.as_str(), "02:01:0a:12:ff:0f");
+    }
+
+    #[test_case]
+    fn test_hw_addr_broadcast() {
+        let addr = EthernetAddress::BROADCAST;
+
+        let mut buffer = StringBuffer::<17>::new();
+        write!(buffer, "{}", addr).unwrap();
+
+        assert_eq!(addr.is_broadcast(), true);
+        assert_eq!(buffer.as_str(), "ff:ff:ff:ff:ff:ff");
     }
 }
