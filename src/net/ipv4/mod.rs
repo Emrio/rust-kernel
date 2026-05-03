@@ -13,14 +13,14 @@ pub struct IPv4Packet<T: AsRef<[u8]>> {
 mod field {
     pub const VERSION: usize = 0; // first 4 bits
     pub const IHL: usize = 0; // last 4 bits
-    pub const TOS: usize = 1;
-    pub const TOTAL_LENGTH: core::ops::Range<usize> = 2..4;
-    pub const ID: core::ops::Range<usize> = 4..6;
-    pub const FLAGS: usize = 6; // first 3 bits
-    pub const FRAGMENT_OFFSET: core::ops::Range<usize> = 6..8; // last 13 bits
-    pub const TTL: usize = 8;
+    // pub const TOS: usize = 1;
+    // pub const TOTAL_LENGTH: core::ops::Range<usize> = 2..4;
+    // pub const ID: core::ops::Range<usize> = 4..6;
+    // pub const FLAGS: usize = 6; // first 3 bits
+    // pub const FRAGMENT_OFFSET: core::ops::Range<usize> = 6..8; // last 13 bits
+    // pub const TTL: usize = 8;
     pub const PROTOCOL: core::ops::Range<usize> = 9..10;
-    pub const CHECKSUM: core::ops::Range<usize> = 10..12;
+    // pub const CHECKSUM: core::ops::Range<usize> = 10..12;
     pub const SOURCE: core::ops::Range<usize> = 12..16;
     pub const DESTINATION: core::ops::Range<usize> = 16..20;
     pub const PAYLOAD: core::ops::RangeFrom<usize> = 20..;
