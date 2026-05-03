@@ -100,3 +100,14 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> IPv4Packet<T> {
         &mut self.buffer.as_mut()[field::PAYLOAD]
     }
 }
+
+impl<T: AsRef<[u8]>> core::fmt::Display for IPv4Packet<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_fmt(format_args!(
+            "IPv4(source={}, destination={}, protocol={})",
+            self.source(),
+            self.destination(),
+            self.protocol()
+        ))
+    }
+}

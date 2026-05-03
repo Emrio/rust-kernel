@@ -1,7 +1,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum EtherType {
-    // IPv4 = 0x0800,
+    IPv4 = 0x0800,
     ARP = 0x0806,
 }
 
@@ -27,6 +27,7 @@ impl EtherType {
 impl core::fmt::Display for EtherType {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self.as_u16() {
+            x if x == EtherType::IPv4 as u16 => f.write_str("IPv4"),
             x if x == EtherType::ARP as u16 => f.write_str("ARP"),
             x => f.write_fmt(format_args!("{x:#x} (unknown)")),
         }
