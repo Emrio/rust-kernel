@@ -16,7 +16,7 @@ use crate::net::arp::{ARP_PACKET, ARPOperation, ARPPacket, HardwareType, Protoco
 use crate::net::ethernet::address::EthernetAddress;
 use crate::net::ethernet::ethertype::EtherType;
 use crate::net::ethernet::{ETHERNET_HEADER, EthernetFrame};
-use crate::net::l3_address::IPv4Address;
+use crate::net::ipv4::address::IPv4Address;
 use crate::pci::{config_read_u32, config_write_u32, find_device};
 
 const ID: u32 = 0x100e_8086;

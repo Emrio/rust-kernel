@@ -6,7 +6,7 @@ pub use hardware_type::HardwareType;
 pub use operation::Operation as ARPOperation;
 pub use protocol_type::ProtocolType;
 
-use crate::net::l3_address::IPv4Address;
+use crate::net::ipv4::address::IPv4Address;
 
 use super::error::BufferTooSmall;
 use super::ethernet::address::EthernetAddress;
@@ -156,7 +156,7 @@ impl<T: AsRef<[u8]>> core::fmt::Display for ARPPacket<T> {
 #[cfg(test)]
 mod test {
     use crate::net::ethernet::address::EthernetAddress;
-    use crate::net::l3_address::IPv4Address;
+    use crate::net::ipv4::address::IPv4Address;
 
     use super::{ARP_PACKET, ARPOperation, ARPPacket, HardwareType, ProtocolType};
 
