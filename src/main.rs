@@ -6,7 +6,8 @@
 
 use bootloader::{BootInfo, entry_point};
 use core::panic::PanicInfo;
-use rust_kernel::{hlt_loop, init, kprintln, memory::MemoryMapper};
+use rust_kernel::memory::{BootInfoFrameAllocator, MemoryMapper};
+use rust_kernel::{hlt_loop, init, kprintln};
 use x86_64::VirtAddr;
 
 entry_point!(kmain);
@@ -17,6 +18,7 @@ fn kmain(boot_info: &'static BootInfo) -> ! {
     kprintln!("Hello World{}", "!");
 
     let mapper = unsafe { MemoryMapper::new(VirtAddr::new(boot_info.physical_memory_offset)) };
+    let _frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_map) };
 
     rust_kernel::drivers::i82540em::find_and_setup_ethernet_controller(&mapper);
 
