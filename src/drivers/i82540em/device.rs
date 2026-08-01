@@ -1,4 +1,4 @@
-use x86_64::instructions::hlt;
+use x86_64::{PhysAddr, instructions::hlt};
 
 use crate::{
     drivers::i82540em::{
@@ -22,10 +22,10 @@ pub struct Device<'a> {
 
 impl<'a> Device<'a> {
     pub(super) fn from(mapper: &'a MemoryMapper<'a>, bar0: u32) -> Self {
-        let base_address = mapper.to_virt_mut((bar0 & 0xfffffff8u32) as u64);
+        let base_address = mapper.to_virt_mut(PhysAddr::new((bar0 & 0xfffffff8u32) as u64));
 
         Self {
-            base_address: base_address as *mut u32,
+            base_address,
             mapper,
             hardware_address: EthernetAddress::BROADCAST,
             rx_handler: None,
