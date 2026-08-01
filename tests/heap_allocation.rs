@@ -11,7 +11,7 @@ use alloc::vec::Vec;
 use bootloader::{BootInfo, entry_point};
 use core::panic::PanicInfo;
 use rust_kernel::allocator::{self, HEAP_SIZE};
-use rust_kernel::memory::{BootInfoFrameAllocator, MemoryMapper};
+use rust_kernel::memory::{self, BootInfoFrameAllocator};
 use x86_64::VirtAddr;
 
 entry_point!(main);
@@ -19,7 +19,7 @@ entry_point!(main);
 fn main(boot_info: &'static BootInfo) -> ! {
     rust_kernel::init();
     let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset);
-    let mut mapper = unsafe { MemoryMapper::new(phys_mem_offset).mapper };
+    let mut mapper = unsafe { memory::init(phys_mem_offset) };
     let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_map) };
     allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
 

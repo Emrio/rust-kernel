@@ -4,42 +4,7 @@ use x86_64::structures::paging::{FrameAllocator, PageTable, PhysFrame, Size4KiB}
 use x86_64::structures::paging::{OffsetPageTable, Translate, mapper::TranslateResult};
 use x86_64::{PhysAddr, VirtAddr};
 
-pub struct MemoryMapper<'a> {
-    pub mapper: OffsetPageTable<'a>,
-    physical_memory_offset: VirtAddr,
-}
-
-impl<'a> MemoryMapper<'a> {
-    pub unsafe fn new(physical_memory_offset: VirtAddr) -> Self {
-        let l4_table = unsafe { get_active_level_4_table(physical_memory_offset) };
-
-        let mapper = unsafe { OffsetPageTable::new(l4_table, physical_memory_offset) };
-
-        Self {
-            mapper,
-            physical_memory_offset,
-        }
-    }
-
-    pub fn to_physical<T>(&self, virt_address: *const T) -> u64 {
-        match self.mapper.translate(VirtAddr::from_ptr(virt_address)) {
-            TranslateResult::Mapped { frame, offset, .. } => {
-                frame.start_address().as_u64() + offset
-            }
-            _ => panic!("Virtual address could not be mapped to physical address"),
-        }
-    }
-
-    pub fn to_virt<T>(&self, phys_address: PhysAddr) -> *const T {
-        (self.physical_memory_offset + phys_address.as_u64()).as_ptr()
-    }
-
-    pub fn to_virt_mut<T>(&self, phys_address: PhysAddr) -> *mut T {
-        (self.physical_memory_offset + phys_address.as_u64()).as_mut_ptr()
-    }
-}
-
-pub unsafe fn get_active_level_4_table(physical_memory_offset: VirtAddr) -> &'static mut PageTable {
+unsafe fn get_active_level_4_table(physical_memory_offset: VirtAddr) -> &'static mut PageTable {
     let (level_4_table_frame, _) = Cr3::read();
 
     let physical_address = level_4_table_frame.start_address();
@@ -47,6 +12,37 @@ pub unsafe fn get_active_level_4_table(physical_memory_offset: VirtAddr) -> &'st
     let page_table_ptr = virtual_address.as_mut_ptr();
 
     unsafe { &mut *page_table_ptr }
+}
+
+pub unsafe fn init(phys_offset: VirtAddr) -> OffsetPageTable<'static> {
+    let l4_table = unsafe { get_active_level_4_table(phys_offset) };
+
+    unsafe { OffsetPageTable::new(l4_table, phys_offset) }
+}
+
+pub trait MemoryMapper {
+    fn to_physical<T>(&self, virt_address: *const T) -> u64;
+    fn to_virt<T>(&self, phys_address: PhysAddr) -> *const T;
+    fn to_virt_mut<T>(&self, phys_address: PhysAddr) -> *mut T;
+}
+
+impl<'a> MemoryMapper for OffsetPageTable<'a> {
+    fn to_physical<T>(&self, virt_address: *const T) -> u64 {
+        match self.translate(VirtAddr::from_ptr(virt_address)) {
+            TranslateResult::Mapped { frame, offset, .. } => {
+                frame.start_address().as_u64() + offset
+            }
+            _ => panic!("Virtual address could not be mapped to physical address"),
+        }
+    }
+
+    fn to_virt<T>(&self, phys_address: PhysAddr) -> *const T {
+        (self.phys_offset() + phys_address.as_u64()).as_ptr()
+    }
+
+    fn to_virt_mut<T>(&self, phys_address: PhysAddr) -> *mut T {
+        (self.phys_offset() + phys_address.as_u64()).as_mut_ptr()
+    }
 }
 
 pub struct BootInfoFrameAllocator {

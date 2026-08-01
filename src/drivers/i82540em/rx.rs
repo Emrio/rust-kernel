@@ -1,3 +1,5 @@
+use x86_64::structures::paging::OffsetPageTable;
+
 use crate::bits::Split;
 use crate::drivers::i82540em::constants::{
     RCTL_BAM, RCTL_BSEX, RCTL_BSIZE_FULL, RCTL_EN, RCTL_UPE, REG_RCTL, REG_RDBAH, REG_RDBAL,
@@ -43,7 +45,7 @@ pub const PACKET_SIZE: usize = 4096;
 pub static mut RX_DESCS: [RxDescriptor; RX_SIZE] = [RxDescriptor::new(); RX_SIZE];
 pub static mut RX_BUFFERS: [[u8; PACKET_SIZE]; RX_SIZE] = [[0u8; PACKET_SIZE]; RX_SIZE];
 
-pub fn setup_rx(device: &Device, mapper: &MemoryMapper) {
+pub fn setup_rx(device: &Device, mapper: &OffsetPageTable<'static>) {
     for index in 0..RX_SIZE {
         unsafe {
             RX_DESCS[index].buffer_address = mapper.to_physical(&raw const RX_BUFFERS[index])

@@ -1,4 +1,4 @@
-use x86_64::{PhysAddr, instructions::hlt};
+use x86_64::{PhysAddr, instructions::hlt, structures::paging::OffsetPageTable};
 
 use crate::{
     drivers::i82540em::{
@@ -15,13 +15,13 @@ use crate::{
 
 pub struct Device<'a> {
     base_address: *mut u32,
-    pub(super) mapper: &'a MemoryMapper<'a>,
+    pub(super) mapper: &'a OffsetPageTable<'static>,
     hardware_address: EthernetAddress,
     rx_handler: Option<&'static dyn Fn(&[u8])>,
 }
 
 impl<'a> Device<'a> {
-    pub(super) fn from(mapper: &'a MemoryMapper<'a>, bar0: u32) -> Self {
+    pub(super) fn from(mapper: &'a OffsetPageTable<'static>, bar0: u32) -> Self {
         let base_address = mapper.to_virt_mut(PhysAddr::new((bar0 & 0xfffffff8u32) as u64));
 
         Self {

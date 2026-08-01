@@ -8,10 +8,10 @@ mod tx;
 
 pub use device::Device as I82540EMEthernetController;
 use x86_64::instructions::hlt;
+use x86_64::structures::paging::OffsetPageTable;
 
 use crate::drivers::i82540em::rx::{RX_BUFFERS, RX_DESCS, setup_rx};
 use crate::drivers::i82540em::tx::setup_tx;
-use crate::memory::MemoryMapper;
 use crate::net::device::NetworkDevice;
 use crate::net::send_arp_request;
 use crate::pci::{config_read_u32, config_write_u32, find_device};
@@ -29,7 +29,7 @@ const I8254_REG_RAH: usize = 0x5404;
 /// Bus Master Enable
 const PCI_COMMAND_BME: u32 = 1 << 2;
 
-pub fn find_and_setup_ethernet_controller(mapper: &MemoryMapper) {
+pub fn find_and_setup_ethernet_controller(mapper: &OffsetPageTable<'static>) {
     let Some((bus, device)) = find_device(ID) else {
         return;
     };
@@ -37,7 +37,7 @@ pub fn find_and_setup_ethernet_controller(mapper: &MemoryMapper) {
     setup_device(mapper, bus, device);
 }
 
-fn setup_device(mapper: &MemoryMapper, bus: u8, device: u8) {
+fn setup_device(mapper: &OffsetPageTable<'static>, bus: u8, device: u8) {
     let bar0 = config_read_u32(bus, device, 0, 0x10);
 
     let mut eth_device = I82540EMEthernetController::from(mapper, bar0);

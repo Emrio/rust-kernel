@@ -8,7 +8,7 @@ extern crate alloc;
 use bootloader::{BootInfo, entry_point};
 use core::panic::PanicInfo;
 use rust_kernel::allocator::init_heap;
-use rust_kernel::memory::{BootInfoFrameAllocator, MemoryMapper};
+use rust_kernel::memory::{self, BootInfoFrameAllocator};
 use rust_kernel::{hlt_loop, init, kprintln};
 use x86_64::VirtAddr;
 
@@ -19,8 +19,7 @@ fn kmain(boot_info: &'static BootInfo) -> ! {
 
     kprintln!("Hello World{}", "!");
 
-    let mut mapper =
-        unsafe { MemoryMapper::new(VirtAddr::new(boot_info.physical_memory_offset)).mapper };
+    let mut mapper = unsafe { memory::init(VirtAddr::new(boot_info.physical_memory_offset)) };
     let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_map) };
 
     init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
