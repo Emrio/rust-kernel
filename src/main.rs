@@ -3,9 +3,11 @@
 #![feature(custom_test_frameworks)]
 #![test_runner(rust_kernel::tests::test_runner)]
 #![reexport_test_harness_main = "test_main"]
+extern crate alloc;
 
 use bootloader::{BootInfo, entry_point};
 use core::panic::PanicInfo;
+use rust_kernel::allocator::init_heap;
 use rust_kernel::memory::{BootInfoFrameAllocator, MemoryMapper};
 use rust_kernel::{hlt_loop, init, kprintln};
 use x86_64::VirtAddr;
@@ -17,10 +19,13 @@ fn kmain(boot_info: &'static BootInfo) -> ! {
 
     kprintln!("Hello World{}", "!");
 
-    let mapper = unsafe { MemoryMapper::new(VirtAddr::new(boot_info.physical_memory_offset)) };
-    let _frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_map) };
+    let mut mapper =
+        unsafe { MemoryMapper::new(VirtAddr::new(boot_info.physical_memory_offset)).mapper };
+    let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_map) };
 
-    rust_kernel::drivers::i82540em::find_and_setup_ethernet_controller(&mapper);
+    init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
+
+    // rust_kernel::drivers::i82540em::find_and_setup_ethernet_controller(&mapper);
 
     #[cfg(test)]
     test_main();

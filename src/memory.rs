@@ -5,7 +5,7 @@ use x86_64::structures::paging::{OffsetPageTable, Translate, mapper::TranslateRe
 use x86_64::{PhysAddr, VirtAddr};
 
 pub struct MemoryMapper<'a> {
-    mapper: OffsetPageTable<'a>,
+    pub mapper: OffsetPageTable<'a>,
     physical_memory_offset: VirtAddr,
 }
 

@@ -7,6 +7,7 @@
 
 #[macro_use]
 pub mod print;
+pub mod allocator;
 pub mod bits;
 pub mod drivers;
 pub mod gdt;
