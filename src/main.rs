@@ -9,9 +9,9 @@ use bootloader::{BootInfo, entry_point};
 use core::panic::PanicInfo;
 use rust_kernel::allocator::init_heap;
 use rust_kernel::memory::{self, BootInfoFrameAllocator};
-use rust_kernel::task::simple_executor::SimpleExecutor;
+use rust_kernel::task::executor::Executor;
 use rust_kernel::task::{Task, keyboard};
-use rust_kernel::{hlt_loop, init, kprintln};
+use rust_kernel::{init, kprintln};
 use x86_64::VirtAddr;
 
 entry_point!(kmain);
@@ -31,11 +31,9 @@ fn kmain(boot_info: &'static BootInfo) -> ! {
 
     // rust_kernel::drivers::i82540em::find_and_setup_ethernet_controller(&mapper);
 
-    let mut executor = SimpleExecutor::new();
+    let mut executor = Executor::new();
     executor.spawn(Task::new(keyboard::print_keypresses()));
     executor.run();
-
-    hlt_loop()
 }
 
 #[cfg(not(test))]
