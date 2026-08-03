@@ -17,6 +17,7 @@ pub mod net;
 pub mod pci;
 pub mod qemu;
 pub mod serial;
+pub mod task;
 pub mod tests;
 pub mod vga;
 

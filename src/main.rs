@@ -9,6 +9,8 @@ use bootloader::{BootInfo, entry_point};
 use core::panic::PanicInfo;
 use rust_kernel::allocator::init_heap;
 use rust_kernel::memory::{self, BootInfoFrameAllocator};
+use rust_kernel::task::simple_executor::SimpleExecutor;
+use rust_kernel::task::{Task, keyboard};
 use rust_kernel::{hlt_loop, init, kprintln};
 use x86_64::VirtAddr;
 
@@ -24,10 +26,14 @@ fn kmain(boot_info: &'static BootInfo) -> ! {
 
     init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
 
-    // rust_kernel::drivers::i82540em::find_and_setup_ethernet_controller(&mapper);
-
     #[cfg(test)]
     test_main();
+
+    // rust_kernel::drivers::i82540em::find_and_setup_ethernet_controller(&mapper);
+
+    let mut executor = SimpleExecutor::new();
+    executor.spawn(Task::new(keyboard::print_keypresses()));
+    executor.run();
 
     hlt_loop()
 }
