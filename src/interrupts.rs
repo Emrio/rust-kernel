@@ -56,6 +56,8 @@ extern "x86-interrupt" fn double_fault_handler(
 extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
     // WARNING: kprint!ing here hangs rust_kernel::vga::tests::test_println_many but I haven't figured out why...
 
+    crate::sleep::tick_calibrator();
+
     unsafe {
         PICS.lock()
             .notify_end_of_interrupt(InterruptIndex::Timer.as_u8());

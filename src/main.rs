@@ -9,6 +9,7 @@ use bootloader::{BootInfo, entry_point};
 use core::panic::PanicInfo;
 use rust_kernel::allocator::init_heap;
 use rust_kernel::memory::{self, BootInfoFrameAllocator};
+use rust_kernel::sleep::init_sleep;
 use rust_kernel::task::executor::block_on;
 use rust_kernel::task::keyboard;
 use rust_kernel::{hlt_loop, init, kprintln};
@@ -28,6 +29,8 @@ fn kmain(boot_info: &'static BootInfo) -> ! {
 
     #[cfg(test)]
     test_main();
+
+    block_on(init_sleep());
 
     // rust_kernel::drivers::i82540em::find_and_setup_ethernet_controller(&mapper);
 
