@@ -99,7 +99,7 @@ mod tests {
         let mut buffer = StringBuffer::<17>::new();
         write!(buffer, "{}", addr).unwrap();
 
-        assert_eq!(addr.is_broadcast(), true);
+        assert!(addr.is_broadcast());
         assert_eq!(buffer.as_str(), "ff:ff:ff:ff:ff:ff");
     }
 }

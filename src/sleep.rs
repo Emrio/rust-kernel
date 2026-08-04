@@ -44,7 +44,7 @@ impl Future for ClockCalibration {
         let tsc_delta = unsafe { _rdtsc() } - self.tsc_begin;
         let tsc_frequency = (tsc_delta * PIT_FREQUENCY) / CALIBRATION_TICK_COUNT / 1_000_000;
 
-        return Poll::Ready(tsc_frequency);
+        Poll::Ready(tsc_frequency)
     }
 }
 

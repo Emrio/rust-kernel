@@ -57,7 +57,7 @@ pub const TCTL_CT: u32 = 0x0f << 4;
 pub const TCTL_COLD: u32 = 0x40 << 12;
 
 pub fn setup_tx(device: &Device, mapper: &OffsetPageTable<'static>) {
-    let tx_desc_address = mapper.to_physical(&raw mut TX_DESCS);
+    let tx_desc_address = mapper.get_physical(&raw mut TX_DESCS);
     let (base_address_high, base_address_low) = tx_desc_address.split();
     device.write_register(REG_TDBAL, base_address_low);
     device.write_register(REG_TDBAH, base_address_high);

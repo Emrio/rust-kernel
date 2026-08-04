@@ -13,16 +13,18 @@ use crate::{
     net::{device::NetworkDevice, ethernet::address::EthernetAddress},
 };
 
+type RxHandler = dyn Fn(&[u8]);
+
 pub struct Device<'a> {
     base_address: *mut u32,
     pub(super) mapper: &'a OffsetPageTable<'static>,
     hardware_address: EthernetAddress,
-    rx_handler: Option<&'static dyn Fn(&[u8])>,
+    rx_handler: Option<&'static RxHandler>,
 }
 
 impl<'a> Device<'a> {
     pub(super) fn from(mapper: &'a OffsetPageTable<'static>, bar0: u32) -> Self {
-        let base_address = mapper.to_virt_mut(PhysAddr::new((bar0 & 0xfffffff8u32) as u64));
+        let base_address = mapper.get_virt_mut(PhysAddr::new((bar0 & 0xfffffff8u32) as u64));
 
         Self {
             base_address,
@@ -87,7 +89,7 @@ impl<'a> Device<'a> {
         hwaddr
     }
 
-    pub fn rx_handler(&self) -> Option<&'static dyn Fn(&[u8])> {
+    pub fn rx_handler(&self) -> Option<&'static RxHandler> {
         self.rx_handler
     }
 }
@@ -106,7 +108,7 @@ impl<'a> NetworkDevice for Device<'a> {
 
             let descriptor = &raw mut TX_DESCS[tail];
             descriptor.write_volatile(TxDescriptor {
-                buffer_address: self.mapper.to_physical(&raw const TX_BUFFERS[tail]),
+                buffer_address: self.mapper.get_physical(&raw const TX_BUFFERS[tail]),
                 length: buffer.len() as u16,
                 checksum_offset: 0,
                 command: CMD_EOP | CMD_IFCS | CMD_RS,

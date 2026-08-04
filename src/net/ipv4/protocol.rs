@@ -16,8 +16,7 @@ impl Protocol {
 
     pub fn as_bytes(self) -> [u8; size_of::<Protocol>()] {
         let value = self as u8;
-        let bytes = value.to_be_bytes();
-        bytes
+        value.to_be_bytes()
     }
 
     pub fn as_u8(self) -> u8 {

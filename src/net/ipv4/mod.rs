@@ -87,12 +87,12 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> IPv4Packet<T> {
     }
 
     pub fn set_destination(&mut self, address: IPv4Address) -> &mut Self {
-        self.buffer.as_mut()[field::DESTINATION].copy_from_slice(&address.as_bytes());
+        self.buffer.as_mut()[field::DESTINATION].copy_from_slice(address.as_bytes());
         self
     }
 
     pub fn set_source(&mut self, address: IPv4Address) -> &mut Self {
-        self.buffer.as_mut()[field::SOURCE].copy_from_slice(&address.as_bytes());
+        self.buffer.as_mut()[field::SOURCE].copy_from_slice(address.as_bytes());
         self
     }
 

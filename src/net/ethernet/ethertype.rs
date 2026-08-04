@@ -15,8 +15,7 @@ impl EtherType {
 
     pub fn as_bytes(self) -> [u8; 2] {
         let value = self as u16;
-        let bytes = value.to_be_bytes();
-        bytes
+        value.to_be_bytes()
     }
 
     pub fn as_u16(self) -> u16 {

@@ -15,7 +15,7 @@ pub(crate) fn add_scancode(scancode: u8) {
         return;
     };
 
-    if let Err(_) = queue.push(scancode) {
+    if queue.push(scancode).is_err() {
         kprintln!("WARNING: scancode queue full; dropping keyboard input");
         return;
     }
@@ -28,7 +28,7 @@ pub struct ScancodeStream {
 }
 
 impl ScancodeStream {
-    pub fn new() -> Self {
+    fn new() -> Self {
         SCANCODE_QUEUE
             .try_init_once(|| ArrayQueue::new(100))
             .expect("ScancodeStream::new should only be called once");
@@ -48,7 +48,7 @@ impl Stream for ScancodeStream {
             return Poll::Ready(Some(scancode));
         }
 
-        WAKER.register(&cx.waker());
+        WAKER.register(cx.waker());
         match queue.pop() {
             Some(scancode) => {
                 WAKER.take();

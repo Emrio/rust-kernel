@@ -1,6 +1,7 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum ProtocolType {
+    #[default]
     IPv4 = 0x0800,
 }
 
@@ -14,18 +15,11 @@ impl ProtocolType {
 
     pub fn as_bytes(self) -> [u8; 2] {
         let value = self as u16;
-        let bytes = value.to_be_bytes();
-        bytes
+        value.to_be_bytes()
     }
 
     pub fn as_u16(self) -> u16 {
         self as u16
-    }
-}
-
-impl Default for ProtocolType {
-    fn default() -> Self {
-        Self::IPv4
     }
 }
 

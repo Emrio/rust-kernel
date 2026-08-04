@@ -48,11 +48,11 @@ pub static mut RX_BUFFERS: [[u8; PACKET_SIZE]; RX_SIZE] = [[0u8; PACKET_SIZE]; R
 pub fn setup_rx(device: &Device, mapper: &OffsetPageTable<'static>) {
     for index in 0..RX_SIZE {
         unsafe {
-            RX_DESCS[index].buffer_address = mapper.to_physical(&raw const RX_BUFFERS[index])
+            RX_DESCS[index].buffer_address = mapper.get_physical(&raw const RX_BUFFERS[index])
         };
     }
 
-    let rx_desc_address = mapper.to_physical(&raw mut RX_DESCS);
+    let rx_desc_address = mapper.get_physical(&raw mut RX_DESCS);
     let (base_address_high, base_address_low) = rx_desc_address.split();
     device.write_register(REG_RDBAL, base_address_low);
     device.write_register(REG_RDBAH, base_address_high);

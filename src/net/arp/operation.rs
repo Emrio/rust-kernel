@@ -15,8 +15,7 @@ impl Operation {
 
     pub fn as_bytes(self) -> [u8; core::mem::size_of::<Self>()] {
         let value = self as u16;
-        let bytes = value.to_be_bytes();
-        bytes
+        value.to_be_bytes()
     }
 
     pub fn as_u16(self) -> u16 {

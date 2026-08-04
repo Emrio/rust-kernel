@@ -14,6 +14,8 @@ unsafe fn get_active_level_4_table(physical_memory_offset: VirtAddr) -> &'static
     unsafe { &mut *page_table_ptr }
 }
 
+/// # Safety
+/// All physical memory must be mapped to virtual memory at the specified offset
 pub unsafe fn init(phys_offset: VirtAddr) -> OffsetPageTable<'static> {
     let l4_table = unsafe { get_active_level_4_table(phys_offset) };
 
@@ -21,13 +23,13 @@ pub unsafe fn init(phys_offset: VirtAddr) -> OffsetPageTable<'static> {
 }
 
 pub trait MemoryMapper {
-    fn to_physical<T>(&self, virt_address: *const T) -> u64;
-    fn to_virt<T>(&self, phys_address: PhysAddr) -> *const T;
-    fn to_virt_mut<T>(&self, phys_address: PhysAddr) -> *mut T;
+    fn get_physical<T>(&self, virt_address: *const T) -> u64;
+    fn get_virt<T>(&self, phys_address: PhysAddr) -> *const T;
+    fn get_virt_mut<T>(&self, phys_address: PhysAddr) -> *mut T;
 }
 
 impl<'a> MemoryMapper for OffsetPageTable<'a> {
-    fn to_physical<T>(&self, virt_address: *const T) -> u64 {
+    fn get_physical<T>(&self, virt_address: *const T) -> u64 {
         match self.translate(VirtAddr::from_ptr(virt_address)) {
             TranslateResult::Mapped { frame, offset, .. } => {
                 frame.start_address().as_u64() + offset
@@ -36,11 +38,11 @@ impl<'a> MemoryMapper for OffsetPageTable<'a> {
         }
     }
 
-    fn to_virt<T>(&self, phys_address: PhysAddr) -> *const T {
+    fn get_virt<T>(&self, phys_address: PhysAddr) -> *const T {
         (self.phys_offset() + phys_address.as_u64()).as_ptr()
     }
 
-    fn to_virt_mut<T>(&self, phys_address: PhysAddr) -> *mut T {
+    fn get_virt_mut<T>(&self, phys_address: PhysAddr) -> *mut T {
         (self.phys_offset() + phys_address.as_u64()).as_mut_ptr()
     }
 }
@@ -51,6 +53,8 @@ pub struct BootInfoFrameAllocator {
 }
 
 impl BootInfoFrameAllocator {
+    /// # Safety
+    /// Memory map must be valid
     pub unsafe fn init(memory_map: &'static MemoryMap) -> Self {
         BootInfoFrameAllocator {
             memory_map,

@@ -24,7 +24,7 @@ fn main(boot_info: &'static BootInfo) -> ! {
     allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
 
     test_main();
-    loop {}
+    unreachable!()
 }
 
 #[panic_handler]

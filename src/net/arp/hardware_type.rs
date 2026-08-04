@@ -1,6 +1,7 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum HardwareType {
+    #[default]
     Ethernet = 0x1,
 }
 
@@ -14,18 +15,11 @@ impl HardwareType {
 
     pub fn as_bytes(self) -> [u8; 2] {
         let value = self as u16;
-        let bytes = value.to_be_bytes();
-        bytes
+        value.to_be_bytes()
     }
 
     pub fn as_u16(self) -> u16 {
         self as u16
-    }
-}
-
-impl Default for HardwareType {
-    fn default() -> Self {
-        Self::Ethernet
     }
 }
 
