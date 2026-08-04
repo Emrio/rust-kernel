@@ -45,7 +45,7 @@ run-command = [
   "filter-dump,id=f1,netdev=n,file=/tmp/eth.pcap",
 ]
 test-success-exit-code = 33
-test-timeout = 300
+test-timeout = 5
 
 [[test]]
 name = "should_panic"
