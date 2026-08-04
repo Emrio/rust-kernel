@@ -11,6 +11,7 @@ static TSC_FREQUENCY: OnceCell<u64> = OnceCell::uninit();
 /**
  * Wait CALIBRATION_TICK_COUNT ticks from the programmable interval timer
  */
+#[must_use = "TSC clock calibrator must be awaited"]
 pub struct ClockCalibration {
     tsc_begin: u64,
     pit_begin: u64,
@@ -76,6 +77,7 @@ pub async fn init_sleep() {
     TSC_FREQUENCY.init_once(|| tsc_frequency);
 }
 
+#[must_use = "Sleep must be awaited"]
 pub struct Sleep {
     target_tsc_tick: u64,
 }
