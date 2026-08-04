@@ -12,9 +12,9 @@ use core::time::Duration;
 
 use bootloader::{BootInfo, entry_point};
 use rust_kernel::allocator;
+use rust_kernel::executor::block_on;
 use rust_kernel::memory::{self, BootInfoFrameAllocator};
 use rust_kernel::sleep::{calibrate, init_sleep, sleep};
-use rust_kernel::task::executor::block_on;
 use x86_64::VirtAddr;
 
 entry_point!(kmain);

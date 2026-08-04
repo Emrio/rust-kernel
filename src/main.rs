@@ -8,10 +8,10 @@ extern crate alloc;
 use bootloader::{BootInfo, entry_point};
 use core::panic::PanicInfo;
 use rust_kernel::allocator::init_heap;
+use rust_kernel::executor::block_on;
+use rust_kernel::keyboard;
 use rust_kernel::memory::{self, BootInfoFrameAllocator};
 use rust_kernel::sleep::init_sleep;
-use rust_kernel::task::executor::block_on;
-use rust_kernel::task::keyboard;
 use rust_kernel::{hlt_loop, init, kprintln};
 use x86_64::VirtAddr;
 

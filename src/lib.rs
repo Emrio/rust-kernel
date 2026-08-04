@@ -10,15 +10,16 @@ pub mod print;
 pub mod allocator;
 pub mod bits;
 pub mod drivers;
+pub mod executor;
 pub mod gdt;
 pub mod interrupts;
+pub mod keyboard;
 pub mod memory;
 pub mod net;
 pub mod pci;
 pub mod qemu;
 pub mod serial;
 pub mod sleep;
-pub mod task;
 pub mod tests;
 pub mod vga;
 
