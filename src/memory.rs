@@ -1,8 +1,11 @@
 use bootloader::bootinfo::{MemoryMap, MemoryRegionType};
+use conquer_once::spin::OnceCell;
 use x86_64::registers::control::Cr3;
 use x86_64::structures::paging::{FrameAllocator, PageTable, PhysFrame, Size4KiB};
 use x86_64::structures::paging::{OffsetPageTable, Translate, mapper::TranslateResult};
 use x86_64::{PhysAddr, VirtAddr};
+
+pub static MEMORY_MAPPER: OnceCell<OffsetPageTable<'static>> = OnceCell::uninit();
 
 unsafe fn get_active_level_4_table(physical_memory_offset: VirtAddr) -> &'static mut PageTable {
     let (level_4_table_frame, _) = Cr3::read();
@@ -79,4 +82,13 @@ unsafe impl FrameAllocator<Size4KiB> for BootInfoFrameAllocator {
         self.next += 1;
         frame
     }
+}
+
+pub fn init_memory(physical_memory_offset: u64, memory_map: &'static MemoryMap) {
+    let mut mapper = unsafe { init(VirtAddr::new(physical_memory_offset)) };
+    let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(memory_map) };
+    crate::allocator::init_heap(&mut mapper, &mut frame_allocator)
+        .expect("heap initialization failed");
+
+    MEMORY_MAPPER.init_once(|| mapper);
 }
