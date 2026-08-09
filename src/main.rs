@@ -10,7 +10,7 @@ use core::panic::PanicInfo;
 use rust_kernel::executor::block_on;
 use rust_kernel::keyboard;
 use rust_kernel::memory::init_memory;
-use rust_kernel::sleep::init_sleep;
+use rust_kernel::time::init_time;
 use rust_kernel::{hlt_loop, init, kprintln};
 
 entry_point!(kmain);

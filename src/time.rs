@@ -2,9 +2,14 @@ use core::arch::x86_64::_rdtsc;
 use core::pin::Pin;
 use core::sync::atomic::{AtomicU64, Ordering};
 use core::task::{Context, Poll};
+use core::time::Duration;
 
 use conquer_once::spin::OnceCell;
 use x86_64::instructions::port::Port;
+
+fn tsc_now() -> u64 {
+    unsafe { _rdtsc() }
+}
 
 static TSC_FREQUENCY: OnceCell<u64> = OnceCell::uninit();
 
@@ -41,7 +46,7 @@ impl Future for ClockCalibration {
             return Poll::Pending;
         }
 
-        let tsc_delta = unsafe { _rdtsc() } - self.tsc_begin;
+        let tsc_delta = tsc_now() - self.tsc_begin;
         let tsc_frequency = (tsc_delta * PIT_FREQUENCY) / CALIBRATION_TICK_COUNT / 1_000_000;
 
         Poll::Ready(tsc_frequency)
@@ -49,7 +54,7 @@ impl Future for ClockCalibration {
 }
 
 pub fn calibrate() -> ClockCalibration {
-    let tsc_begin = unsafe { _rdtsc() };
+    let tsc_begin = tsc_now();
     let pit_begin = CALIBRATION_TICKER.load(Ordering::Acquire);
 
     ClockCalibration {
@@ -69,24 +74,90 @@ fn set_pit_frequency_to_target() {
     }
 }
 
-/// This function enables the use of the `sleep()` function.
+/// This function enables the use of the `sleep()` function and other time utilities.
 /// WARNING: It also increases the PIT interrupt frequency from 18.2 Hz to 600 Hz!
-pub async fn init_sleep() {
+pub async fn init_time() {
     set_pit_frequency_to_target();
     let tsc_frequency = calibrate().await;
     TSC_FREQUENCY.init_once(|| tsc_frequency);
 }
 
+// Everything beyond this point assumes TSC_FREQUENCY is set
+
+trait TickSupport {
+    fn from_ticks(ticks: u64) -> Self;
+    fn to_ticks(self) -> u64;
+}
+
+// t = ns * freq / 1_000_000_000
+// t * 1_000_000_000 / freq = ns
+impl TickSupport for Duration {
+    fn from_ticks(ticks: u64) -> Self {
+        let frequency = TSC_FREQUENCY
+            .get()
+            .expect("must run init_sleep() before using time utilities");
+
+        Self::from_nanos_u128((ticks as u128 * 1_000_000_000) / *frequency as u128)
+    }
+
+    fn to_ticks(self) -> u64 {
+        let frequency = TSC_FREQUENCY
+            .get()
+            .expect("must run init_sleep() before using time utilities");
+
+        ((self.as_nanos() * *frequency as u128) / 1_000_000_000) as u64
+    }
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+pub struct Instant(u64);
+
+impl Instant {
+    pub fn now() -> Self {
+        Self(tsc_now())
+    }
+}
+
+impl core::ops::Add<u64> for Instant {
+    type Output = Instant;
+
+    fn add(self, rhs: u64) -> Self::Output {
+        Self(self.0 + rhs)
+    }
+}
+
+impl core::ops::Add<Duration> for Instant {
+    type Output = Instant;
+
+    fn add(self, rhs: Duration) -> Self::Output {
+        Self(self.0 + rhs.to_ticks())
+    }
+}
+
+impl core::ops::Sub for Instant {
+    type Output = Duration;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        let Some(delta) = self.0.checked_sub(rhs.0) else {
+            panic!(
+                "Trying to subtract two Instants a - b where a < b. Negative durations are not supported."
+            );
+        };
+
+        Duration::from_ticks(delta)
+    }
+}
+
 #[must_use = "Sleep must be awaited"]
 pub struct Sleep {
-    target_tsc_tick: u64,
+    target_tsc_tick: Instant,
 }
 
 impl Future for Sleep {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let now = unsafe { _rdtsc() };
+        let now = Instant::now();
 
         if now < self.target_tsc_tick {
             Poll::Pending
@@ -97,15 +168,8 @@ impl Future for Sleep {
 }
 
 /// WARNING: This function cannot be called before `init_sleep()`!
-pub fn sleep(delay: core::time::Duration) -> Sleep {
-    let frequency = TSC_FREQUENCY
-        .get()
-        .expect("must run init_sleep() before using sleep()");
-    let number_of_ticks = ((delay.as_nanos() * *frequency as u128) / 1_000_000_000) as u64;
-
-    let now = unsafe { _rdtsc() };
-
+pub fn sleep(delay: Duration) -> Sleep {
     Sleep {
-        target_tsc_tick: now + number_of_ticks,
+        target_tsc_tick: Instant::now() + delay,
     }
 }

@@ -14,7 +14,7 @@ use bootloader::{BootInfo, entry_point};
 use rust_kernel::allocator;
 use rust_kernel::executor::block_on;
 use rust_kernel::memory::{self, BootInfoFrameAllocator};
-use rust_kernel::sleep::{calibrate, init_sleep, sleep};
+use rust_kernel::time::{calibrate, init_time, sleep};
 use x86_64::VirtAddr;
 
 entry_point!(kmain);
@@ -41,7 +41,7 @@ fn cycles_to_nanos(tsc_cycles: u64, frequency_hz: u64) -> u64 {
 }
 
 async fn sleep_elapsed_ns(delay: Duration) -> u64 {
-    init_sleep().await;
+    init_time().await;
     let frequency = calibrate().await;
 
     let before = unsafe { _rdtsc() };
@@ -84,7 +84,7 @@ async fn sleep_long() -> u64 {
 }
 
 async fn sleep_short_long() -> (u64, u64) {
-    init_sleep().await;
+    init_time().await;
 
     join!(sleep_short(), sleep_long()).await
 }

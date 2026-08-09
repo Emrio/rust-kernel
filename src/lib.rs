@@ -20,8 +20,8 @@ pub mod net;
 pub mod pci;
 pub mod qemu;
 pub mod serial;
-pub mod sleep;
 pub mod tests;
+pub mod time;
 pub mod vga;
 
 pub fn init() {
