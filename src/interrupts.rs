@@ -2,42 +2,34 @@ use lazy_static::lazy_static;
 use pic8259::ChainedPics;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
 
-use crate::gdt;
+use crate::{drivers::i82540em::DEVICE, gdt, net};
 
 pub const PIC_1_OFFSET: u8 = 32;
 pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
 
-struct Irq(u8);
+#[derive(Debug, Clone, Copy)]
+struct InterruptIndex(u8);
 
-impl Irq {
-    const fn into_index(self) -> u8 {
-        self.0
+impl InterruptIndex {
+    const fn new(irq_line: u8) -> Self {
+        Self(irq_line)
     }
 
-    const fn new(irq: u8) -> Self {
-        if irq < 8 {
-            Self(PIC_1_OFFSET + irq)
+    const fn into_index(self) -> u8 {
+        if self.0 < 8 {
+            PIC_1_OFFSET + self.0
         } else {
-            Self(PIC_2_OFFSET + irq - 8)
+            PIC_2_OFFSET + self.0 - 8
         }
     }
+
+    const TIMER: Self = Self::new(0);
+    const KEYBOARD: Self = Self::new(1);
+    const ETHERNET_RX: Self = Self::new(11);
 }
 
 pub static PICS: spin::Mutex<ChainedPics> =
     spin::Mutex::new(unsafe { ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET) });
-
-#[derive(Debug, Clone, Copy)]
-#[repr(u8)]
-pub enum InterruptIndex {
-    Timer = Irq::new(0).into_index(),
-    Keyboard = Irq::new(1).into_index(),
-}
-
-impl InterruptIndex {
-    fn as_u8(self) -> u8 {
-        self as u8
-    }
-}
 
 lazy_static! {
     static ref IDT: InterruptDescriptorTable = {
@@ -48,8 +40,9 @@ lazy_static! {
                 .set_handler_fn(double_fault_handler)
                 .set_stack_index(gdt::DOUBLE_FAULT_IST_INDEX);
         }
-        idt[InterruptIndex::Timer.as_u8()].set_handler_fn(timer_interrupt_handler);
-        idt[InterruptIndex::Keyboard.as_u8()].set_handler_fn(keyboard_interrupt_handler);
+        idt[InterruptIndex::TIMER.into_index()].set_handler_fn(timer_interrupt_handler);
+        idt[InterruptIndex::KEYBOARD.into_index()].set_handler_fn(keyboard_interrupt_handler);
+        idt[InterruptIndex::ETHERNET_RX.into_index()].set_handler_fn(handle_ethernet_frame);
         idt
     };
 }
@@ -76,7 +69,7 @@ extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFr
 
     unsafe {
         PICS.lock()
-            .notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
+            .notify_end_of_interrupt(InterruptIndex::TIMER.into_index());
     }
 }
 
@@ -89,7 +82,20 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
 
     unsafe {
         PICS.lock()
-            .notify_end_of_interrupt(InterruptIndex::Keyboard.as_u8());
+            .notify_end_of_interrupt(InterruptIndex::KEYBOARD.into_index());
+    }
+}
+
+extern "x86-interrupt" fn handle_ethernet_frame(_stack_frame: InterruptStackFrame) {
+    net::rx::WAKER.wake();
+
+    if let Some(device) = DEVICE.get() {
+        device.on_rx_interrupt()
+    }
+
+    unsafe {
+        PICS.lock()
+            .notify_end_of_interrupt(InterruptIndex::ETHERNET_RX.into_index());
     }
 }
 

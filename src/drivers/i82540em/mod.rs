@@ -10,7 +10,8 @@ use conquer_once::spin::OnceCell;
 
 pub use device::Device as I82540EMEthernetController;
 
-use crate::drivers::i82540em::rx::setup_rx;
+use crate::bits::SplitTwice;
+use crate::drivers::i82540em::rx::{enable_rx_interrupts, setup_rx};
 use crate::drivers::i82540em::tx::setup_tx;
 use crate::pci::{config_read_u32, config_write_u32, find_device};
 
@@ -51,4 +52,9 @@ fn setup_device(bus: u8, device: u8) {
     setup_tx(&eth_device);
 
     DEVICE.init_once(|| eth_device);
+
+    let eth_device = DEVICE.get().expect("device to be initialized");
+
+    let (_, _, _, interupt_line) = config_read_u32(bus, device, 0, 0x3c).split_twice();
+    enable_rx_interrupts(eth_device, interupt_line);
 }

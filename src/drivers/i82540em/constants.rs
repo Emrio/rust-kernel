@@ -18,4 +18,10 @@ pub const REG_RDLEN: usize = 0x2808;
 
 // pub const REG_RDH: usize = 0x2810;
 
+pub const REG_RDH: usize = 0x2810;
 pub const REG_RDT: usize = 0x2818;
+
+/// Interrupt Mask Set/Read: enable interrupts
+pub const REG_IMS: usize = 0xd0;
+/// Receiver Timer Interrupt
+pub const IMS_RXT0: u32 = 1 << 7;

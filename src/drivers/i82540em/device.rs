@@ -1,9 +1,15 @@
+extern crate alloc;
+
+use alloc::vec::Vec;
+
 use x86_64::{PhysAddr, instructions::hlt};
 
 use crate::{
     drivers::i82540em::{
         I8254_CTRL_ASDE, I8254_CTRL_RESET, I8254_CTRL_SLU, I8254_EERD_DONE, I8254_REG_CTRL,
         I8254_REG_EERD, I8254_REG_RAH, I8254_REG_RAL,
+        constants::{REG_RDH, REG_RDT},
+        rx::{RX_BUFFERS, RX_DESCS, RX_SIZE},
         tx::{
             CMD_EOP, CMD_IFCS, CMD_RS, REG_TDH, REG_TDT, STA_DD, TX_BUFFERS, TX_DESCS, TX_SIZE,
             TxDescriptor,
@@ -87,6 +93,11 @@ impl Device {
 
         hwaddr
     }
+
+    pub(crate) fn on_rx_interrupt(&self) {
+        // clear ICR on read
+        self.read_register(0xc0);
+    }
 }
 
 impl NetworkDevice for Device {
@@ -128,5 +139,42 @@ impl NetworkDevice for Device {
 
     fn hardware_address(&self) -> EthernetAddress {
         self.hardware_address
+    }
+
+    // SAFETY:
+    // {RX_BUFFERS,RX_DESCS}[rdh .. rdt] is owned by hardware
+    // {RX_BUFFERS,RX_DESCS}[rdt .. rdh] is owned by software
+    //
+    // This is valid while using one core.
+    // It needs to be patched though when using multiple cores.
+    fn poll_packet(&self) -> Option<Vec<u8>> {
+        let rdt = self.read_register(REG_RDT) as usize;
+
+        let rdh = self.read_register(REG_RDH) as usize;
+
+        let next_rdt = (rdt + 1) % RX_SIZE;
+        if next_rdt == rdh {
+            // Nothing to read
+            return None;
+        }
+
+        let descriptor = unsafe { &RX_DESCS[next_rdt] };
+
+        // TODO: handle partial packets
+
+        let buffer = if descriptor.is_ok() {
+            let buffer = unsafe { RX_BUFFERS[next_rdt] };
+
+            let packet = &buffer[0..descriptor.length()];
+
+            // copy the packet and free it immediately
+            Some(packet.to_vec())
+        } else {
+            None
+        };
+
+        self.write_register(REG_RDT, next_rdt as u32);
+
+        buffer
     }
 }

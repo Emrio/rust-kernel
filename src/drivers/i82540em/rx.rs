@@ -2,17 +2,17 @@ use core::ops::Not;
 
 use crate::bits::Split;
 use crate::drivers::i82540em::constants::{
-    RCTL_BAM, RCTL_BSEX, RCTL_BSIZE_FULL, RCTL_EN, RCTL_UPE, REG_RCTL, REG_RDBAH, REG_RDBAL,
-    REG_RDLEN, REG_RDT,
+    IMS_RXT0, RCTL_BAM, RCTL_BSEX, RCTL_BSIZE_FULL, RCTL_EN, RCTL_UPE, REG_IMS, REG_RCTL,
+    REG_RDBAH, REG_RDBAL, REG_RDLEN, REG_RDT,
 };
 use crate::drivers::i82540em::device::Device;
 use crate::memory::{MEMORY_MAPPER, MemoryMapper};
 
 #[derive(Default, Clone, Copy, Debug)]
 #[repr(C, align(16))]
-pub struct RxDescriptor {
+pub(crate) struct RxDescriptor {
     buffer_address: u64,
-    pub(super) length: u16,
+    length: u16,
     checksum: u16,
     /// DD = Descriptor Done
     /// EOF = End Of Packet
@@ -37,6 +37,14 @@ impl RxDescriptor {
             checksum: 0,
             length: 0,
         }
+    }
+
+    pub fn is_ok(&self) -> bool {
+        self.status != 0 && self.error == 0
+    }
+
+    pub fn length(&self) -> usize {
+        self.length as usize
     }
 }
 
@@ -70,4 +78,19 @@ pub fn setup_rx(device: &Device) {
         REG_RCTL,
         RCTL_EN | RCTL_UPE | RCTL_BAM | RCTL_BSIZE_FULL | RCTL_BSEX,
     );
+}
+
+pub fn enable_rx_interrupts(device: &Device, interrupt_line: u8) {
+    let ims = device.read_register(REG_IMS);
+    device.write_register(REG_IMS, ims | IMS_RXT0);
+
+    // TODO: configure the idt[interrupt_line], do not hardcode
+
+    x86_64::instructions::interrupts::without_interrupts(|| {
+        let mut pics = crate::interrupts::PICS.lock();
+
+        let pics_masks = unsafe { pics.read_masks() };
+        let (mask2, mask1) = (1u16 << interrupt_line).not().split();
+        unsafe { pics.write_masks(pics_masks[0] & mask1, pics_masks[1] & mask2) }
+    })
 }
