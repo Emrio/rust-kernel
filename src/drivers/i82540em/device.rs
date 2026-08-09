@@ -1,4 +1,4 @@
-use x86_64::{PhysAddr, instructions::hlt, structures::paging::OffsetPageTable};
+use x86_64::{PhysAddr, instructions::hlt};
 
 use crate::{
     drivers::i82540em::{
@@ -9,28 +9,27 @@ use crate::{
             TxDescriptor,
         },
     },
-    memory::MemoryMapper,
+    memory::{MEMORY_MAPPER, MemoryMapper},
+    mmio::MmioPtr,
     net::{device::NetworkDevice, ethernet::address::EthernetAddress},
 };
 
-type RxHandler = dyn Fn(&[u8]);
-
-pub struct Device<'a> {
-    base_address: *mut u32,
-    pub(super) mapper: &'a OffsetPageTable<'static>,
+pub struct Device {
+    base_address: MmioPtr<u32>,
     hardware_address: EthernetAddress,
-    rx_handler: Option<&'static RxHandler>,
 }
 
-impl<'a> Device<'a> {
-    pub(super) fn from(mapper: &'a OffsetPageTable<'static>, bar0: u32) -> Self {
+impl Device {
+    pub(super) fn from(bar0: u32) -> Self {
+        let mapper = MEMORY_MAPPER
+            .get()
+            .expect("memory mapper to be initialized");
+
         let base_address = mapper.get_virt_mut(PhysAddr::new((bar0 & 0xfffffff8u32) as u64));
 
         Self {
-            base_address,
-            mapper,
+            base_address: MmioPtr::new(base_address),
             hardware_address: EthernetAddress::BROADCAST,
-            rx_handler: None,
         }
     }
 
@@ -88,14 +87,14 @@ impl<'a> Device<'a> {
 
         hwaddr
     }
-
-    pub fn rx_handler(&self) -> Option<&'static RxHandler> {
-        self.rx_handler
-    }
 }
 
-impl<'a> NetworkDevice for Device<'a> {
+impl NetworkDevice for Device {
     fn send_packet(&self, buffer: &[u8]) {
+        let mapper = MEMORY_MAPPER
+            .get()
+            .expect("memory mapper to be initialized");
+
         let tail = self.read_register(REG_TDT) as usize;
         let head = self.read_register(REG_TDH) as usize;
 
@@ -108,7 +107,7 @@ impl<'a> NetworkDevice for Device<'a> {
 
             let descriptor = &raw mut TX_DESCS[tail];
             descriptor.write_volatile(TxDescriptor {
-                buffer_address: self.mapper.get_physical(&raw const TX_BUFFERS[tail]),
+                buffer_address: mapper.get_physical(&raw const TX_BUFFERS[tail]),
                 length: buffer.len() as u16,
                 checksum_offset: 0,
                 command: CMD_EOP | CMD_IFCS | CMD_RS,
@@ -129,9 +128,5 @@ impl<'a> NetworkDevice for Device<'a> {
 
     fn hardware_address(&self) -> EthernetAddress {
         self.hardware_address
-    }
-
-    fn setup_device_rx(&mut self, handler_fn: &'static dyn Fn(&[u8])) {
-        self.rx_handler = Some(handler_fn);
     }
 }

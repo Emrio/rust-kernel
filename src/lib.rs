@@ -15,6 +15,7 @@ pub mod gdt;
 pub mod interrupts;
 pub mod keyboard;
 pub mod memory;
+pub(crate) mod mmio;
 pub mod net;
 pub mod pci;
 pub mod qemu;

@@ -1,4 +1,4 @@
-use x86_64::structures::paging::OffsetPageTable;
+use core::ops::Not;
 
 use crate::bits::Split;
 use crate::drivers::i82540em::constants::{
@@ -6,7 +6,7 @@ use crate::drivers::i82540em::constants::{
     REG_RDLEN, REG_RDT,
 };
 use crate::drivers::i82540em::device::Device;
-use crate::memory::MemoryMapper;
+use crate::memory::{MEMORY_MAPPER, MemoryMapper};
 
 #[derive(Default, Clone, Copy, Debug)]
 #[repr(C, align(16))]
@@ -45,7 +45,11 @@ pub const PACKET_SIZE: usize = 4096;
 pub static mut RX_DESCS: [RxDescriptor; RX_SIZE] = [RxDescriptor::new(); RX_SIZE];
 pub static mut RX_BUFFERS: [[u8; PACKET_SIZE]; RX_SIZE] = [[0u8; PACKET_SIZE]; RX_SIZE];
 
-pub fn setup_rx(device: &Device, mapper: &OffsetPageTable<'static>) {
+pub fn setup_rx(device: &Device) {
+    let mapper = MEMORY_MAPPER
+        .get()
+        .expect("memory mapper to be initialized");
+
     for index in 0..RX_SIZE {
         unsafe {
             RX_DESCS[index].buffer_address = mapper.get_physical(&raw const RX_BUFFERS[index])

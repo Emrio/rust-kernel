@@ -1,8 +1,6 @@
-use x86_64::structures::paging::OffsetPageTable;
-
 use crate::bits::Split;
 use crate::drivers::i82540em::device::Device;
-use crate::memory::MemoryMapper;
+use crate::memory::{MEMORY_MAPPER, MemoryMapper};
 
 #[derive(Clone, Copy, Debug)]
 #[repr(C, align(16))]
@@ -56,7 +54,11 @@ pub const TCTL_CT: u32 = 0x0f << 4;
 /// Collision Distance
 pub const TCTL_COLD: u32 = 0x40 << 12;
 
-pub fn setup_tx(device: &Device, mapper: &OffsetPageTable<'static>) {
+pub fn setup_tx(device: &Device) {
+    let mapper = MEMORY_MAPPER
+        .get()
+        .expect("memory mapper to be initialized");
+
     let tx_desc_address = mapper.get_physical(&raw mut TX_DESCS);
     let (base_address_high, base_address_low) = tx_desc_address.split();
     device.write_register(REG_TDBAL, base_address_low);
