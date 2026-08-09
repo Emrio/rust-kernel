@@ -9,13 +9,11 @@ extern crate alloc;
 use bootloader::{BootInfo, entry_point};
 use core::future::join;
 use core::panic::PanicInfo;
-use core::time::Duration;
-use rust_kernel::drivers::i82540em::DEVICE;
 use rust_kernel::executor::block_on;
 use rust_kernel::keyboard;
 use rust_kernel::memory::init_memory;
 use rust_kernel::net;
-use rust_kernel::time::{init_time, sleep};
+use rust_kernel::time::init_time;
 use rust_kernel::{hlt_loop, init, kprintln};
 
 entry_point!(kmain);
@@ -35,7 +33,7 @@ fn kmain(boot_info: &'static BootInfo) -> ! {
     rust_kernel::drivers::i82540em::find_and_setup_ethernet_controller();
     block_on(join!(
         net::rx_loop(),
-        my_tx_loop(),
+        net::net_loop(),
         keyboard::print_keypresses()
     ));
 
@@ -54,13 +52,4 @@ fn panic(info: &PanicInfo) -> ! {
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     rust_kernel::tests::test_panic_handler(info)
-}
-
-async fn my_tx_loop() {
-    let device = DEVICE.get().expect("initialized");
-
-    loop {
-        net::send_arp_request(device);
-        sleep(Duration::from_secs(5)).await;
-    }
 }

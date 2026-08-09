@@ -8,7 +8,8 @@ use futures_util::task::AtomicWaker;
 use futures_util::{Stream, StreamExt};
 
 use crate::drivers::i82540em::DEVICE;
-use crate::net::arp::ARPPacket;
+use crate::net::STATE_MACHINE;
+use crate::net::arp::{ARPOperation, ARPPacket};
 use crate::net::device::NetworkDevice;
 use crate::net::error::BufferTooSmall;
 use crate::net::ethernet::{EthernetFrame, ethertype::EtherType};
@@ -27,9 +28,18 @@ fn handle_incoming_ethernet_packet(buffer: &[u8]) {
         return;
     };
 
+    let mut state_machine = STATE_MACHINE.lock();
+
     match frame.ethertype() {
         EtherType::ARP => match ARPPacket::new(frame.payload()) {
-            Ok(arp) => kprintln!("ARP packet: {}", arp),
+            Ok(arp) => {
+                kprintln!("ARP packet: {}", arp);
+
+                if arp.operation() == ARPOperation::Reply && state_machine.ipv4.is_none() {
+                    kprintln!("My IPv4: {}", arp.target_protocol_address());
+                    state_machine.ipv4 = Some(arp.target_protocol_address());
+                }
+            }
             Err(BufferTooSmall) => kprintln!("Error: ARP packet too small!"),
         },
         EtherType::IPv4 => match IPv4Packet::new(frame.payload()) {

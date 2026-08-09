@@ -1,8 +1,16 @@
-use crate::net::{
-    arp::{ARP_PACKET, ARPOperation, ARPPacket, HardwareType, ProtocolType},
-    device::NetworkDevice,
-    ethernet::{ETHERNET_HEADER, EthernetFrame, address::EthernetAddress, ethertype::EtherType},
-    ipv4::address::IPv4Address,
+use core::time::Duration;
+
+use crate::{
+    drivers::i82540em::DEVICE,
+    net::{
+        arp::{ARP_PACKET, ARPOperation, ARPPacket, HardwareType, ProtocolType},
+        device::NetworkDevice,
+        ethernet::{
+            ETHERNET_HEADER, EthernetFrame, address::EthernetAddress, ethertype::EtherType,
+        },
+        ipv4::address::IPv4Address,
+    },
+    time::{Instant, sleep},
 };
 
 pub mod arp;
@@ -40,3 +48,29 @@ pub fn send_arp_request(device: &impl NetworkDevice) {
 }
 
 pub use rx::rx_loop;
+
+pub struct StateMachine {
+    ipv4: Option<IPv4Address>,
+    last_arp_request: Instant,
+}
+
+static STATE_MACHINE: spin::Mutex<StateMachine> = spin::Mutex::new(StateMachine {
+    ipv4: None,
+    last_arp_request: Instant::zero(),
+});
+
+pub async fn net_loop() {
+    loop {
+        let mut state_machine = STATE_MACHINE.lock();
+        if let Some(device) = DEVICE.get()
+            && state_machine.ipv4.is_none()
+            && Instant::now() - state_machine.last_arp_request > Duration::from_secs(5)
+        {
+            state_machine.last_arp_request = Instant::now();
+            send_arp_request(device);
+        }
+        drop(state_machine);
+
+        sleep(Duration::from_secs(1)).await;
+    }
+}

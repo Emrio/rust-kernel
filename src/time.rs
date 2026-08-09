@@ -116,6 +116,10 @@ impl Instant {
     pub fn now() -> Self {
         Self(tsc_now())
     }
+
+    pub(crate) const fn zero() -> Self {
+        Self(0)
+    }
 }
 
 impl core::ops::Add<u64> for Instant {
