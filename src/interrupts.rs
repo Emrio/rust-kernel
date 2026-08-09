@@ -7,14 +7,30 @@ use crate::gdt;
 pub const PIC_1_OFFSET: u8 = 32;
 pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
 
+struct Irq(u8);
+
+impl Irq {
+    const fn into_index(self) -> u8 {
+        self.0
+    }
+
+    const fn new(irq: u8) -> Self {
+        if irq < 8 {
+            Self(PIC_1_OFFSET + irq)
+        } else {
+            Self(PIC_2_OFFSET + irq - 8)
+        }
+    }
+}
+
 pub static PICS: spin::Mutex<ChainedPics> =
     spin::Mutex::new(unsafe { ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET) });
 
 #[derive(Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum InterruptIndex {
-    Timer = PIC_1_OFFSET,
-    Keyboard,
+    Timer = Irq::new(0).into_index(),
+    Keyboard = Irq::new(1).into_index(),
 }
 
 impl InterruptIndex {
