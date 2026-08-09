@@ -1,3 +1,9 @@
+pub const REG_STATUS: usize = 0x8;
+/// Link Up?
+pub const STATUS_LU: u32 = 1 << 1;
+pub const STATUS_SPEED_0: u32 = 0;
+pub const STATUS_SPEED_100: u32 = 1 << 6;
+pub const STATUS_SPEED: u32 = 0b11 << 6;
 pub const REG_RCTL: usize = 0x100;
 /// Receiver Enable
 pub const RCTL_EN: u32 = 1 << 1;

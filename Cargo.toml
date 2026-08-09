@@ -28,6 +28,11 @@ bench = false
 [package.metadata.bootimage]
 run-command = [
   "qemu-system-x86_64",
+  # Dump all interrupts to ease up debugging
+  # "-d",
+  # "int",
+  # "-D",
+  # "/tmp/int.log",
   "-drive",
   "format=raw,file={}",
   "-device",

@@ -57,7 +57,6 @@ fn panic(info: &PanicInfo) -> ! {
 }
 
 async fn my_tx_loop() {
-    sleep(Duration::from_secs(5)).await;
     let device = DEVICE.get().expect("initialized");
 
     loop {

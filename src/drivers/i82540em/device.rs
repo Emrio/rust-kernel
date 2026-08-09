@@ -8,7 +8,9 @@ use crate::{
     drivers::i82540em::{
         I8254_CTRL_ASDE, I8254_CTRL_RESET, I8254_CTRL_SLU, I8254_EERD_DONE, I8254_REG_CTRL,
         I8254_REG_EERD, I8254_REG_RAH, I8254_REG_RAL,
-        constants::{REG_RDH, REG_RDT},
+        constants::{
+            REG_RDH, REG_RDT, REG_STATUS, STATUS_LU, STATUS_SPEED, STATUS_SPEED_0, STATUS_SPEED_100,
+        },
         rx::{RX_BUFFERS, RX_DESCS, RX_SIZE},
         tx::{
             CMD_EOP, CMD_IFCS, CMD_RS, REG_TDH, REG_TDT, STA_DD, TX_BUFFERS, TX_DESCS, TX_SIZE,
@@ -19,6 +21,22 @@ use crate::{
     mmio::MmioPtr,
     net::{device::NetworkDevice, ethernet::address::EthernetAddress},
 };
+
+pub(crate) struct Status(u32);
+
+impl Status {
+    pub(crate) fn is_link_up(&self) -> bool {
+        self.0 & STATUS_LU != 0
+    }
+
+    pub(crate) fn speed(&self) -> u16 {
+        match self.0 & STATUS_SPEED {
+            STATUS_SPEED_0 => 0,
+            STATUS_SPEED_100 => 100,
+            _ => 1000,
+        }
+    }
+}
 
 pub struct Device {
     base_address: MmioPtr<u32>,
@@ -97,6 +115,10 @@ impl Device {
     pub(crate) fn on_rx_interrupt(&self) {
         // clear ICR on read
         self.read_register(0xc0);
+    }
+
+    pub(crate) fn status(&self) -> Status {
+        Status(self.read_register(REG_STATUS))
     }
 }
 

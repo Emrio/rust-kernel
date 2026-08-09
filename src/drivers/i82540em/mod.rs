@@ -9,6 +9,7 @@ mod tx;
 use conquer_once::spin::OnceCell;
 
 pub use device::Device as I82540EMEthernetController;
+use x86_64::instructions::hlt;
 
 use crate::bits::SplitTwice;
 use crate::drivers::i82540em::rx::{enable_rx_interrupts, setup_rx};
@@ -44,6 +45,12 @@ fn setup_device(bus: u8, device: u8) {
     let mut eth_device = I82540EMEthernetController::from(bar0);
 
     eth_device.reset_nic_and_fetch_hw_address();
+
+    while !eth_device.status().is_link_up() {
+        kprintln!("Not ready!");
+        hlt();
+    }
+    kprintln!("Link up, speed: {} Mbit/s", eth_device.status().speed());
 
     let command = config_read_u32(bus, device, 0, 0x04);
     config_write_u32(bus, device, 0, 0x04, command | PCI_COMMAND_BME);
