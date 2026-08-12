@@ -6,18 +6,18 @@
 
 ### Main objectives
 
-- Working ethernet IO
-- Answer to ICMP echo
-- DHCP autoconfiguration
-- HTTP file server
+- [x] Working ethernet IO
+- [x] Answer to ICMP echo
+- [ ] DHCP autoconfiguration
+- [ ] HTTP file server
 
 ### Side quests
 
-- Async execution
-- Memory management, paging, and virtual memory
-- Multi-NIC support, forwarding, and basic routing
-- Write uart_16550 driver from scratch
-- Multi-core
+- [x] Async execution
+- [x] Memory management, paging, and virtual memory
+- [ ] Multi-NIC support, forwarding, and basic routing
+- [ ] Write uart_16550 driver from scratch
+- [ ] Multi-core
 
 ## Sources, ressources, and inspirations
 
