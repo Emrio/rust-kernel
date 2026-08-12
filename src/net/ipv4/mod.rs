@@ -14,7 +14,7 @@ mod field {
     pub const VERSION: usize = 0; // first 4 bits
     pub const IHL: usize = 0; // last 4 bits
     // pub const TOS: usize = 1;
-    // pub const TOTAL_LENGTH: core::ops::Range<usize> = 2..4;
+    pub const TOTAL_LENGTH: core::ops::Range<usize> = 2..4;
     // pub const ID: core::ops::Range<usize> = 4..6;
     // pub const FLAGS: usize = 6; // first 3 bits
     // pub const FRAGMENT_OFFSET: core::ops::Range<usize> = 6..8; // last 13 bits
@@ -23,7 +23,6 @@ mod field {
     pub const CHECKSUM: core::ops::Range<usize> = 10..12;
     pub const SOURCE: core::ops::Range<usize> = 12..16;
     pub const DESTINATION: core::ops::Range<usize> = 16..20;
-    pub const PAYLOAD: core::ops::RangeFrom<usize> = 20..;
 }
 
 pub const IPV4_PACKET: usize = 20;
@@ -63,6 +62,13 @@ impl<T: AsRef<[u8]>> IPv4Packet<T> {
         self.header_length() as usize * 4
     }
 
+    pub fn packet_length(&self) -> usize {
+        let mut destination = [0; size_of::<u16>()];
+        destination.copy_from_slice(&self.buffer.as_ref()[field::TOTAL_LENGTH]);
+        let size = u16::from_be_bytes(destination);
+        size as usize
+    }
+
     pub fn protocol(&self) -> Protocol {
         Protocol::from_bytes(&self.buffer.as_ref()[field::PROTOCOL])
     }
@@ -80,13 +86,24 @@ impl<T: AsRef<[u8]>> IPv4Packet<T> {
     }
 
     pub fn payload(&self) -> &[u8] {
-        &self.buffer.as_ref()[field::PAYLOAD]
+        let range = self.header_length_bytes()..self.packet_length();
+        &self.buffer.as_ref()[range]
     }
 }
 
 impl<T: AsRef<[u8]> + AsMut<[u8]>> IPv4Packet<T> {
     pub fn set_version_and_length(&mut self) -> &mut Self {
         self.buffer.as_mut()[field::VERSION] = (4 << 4) + 5;
+        self
+    }
+
+    pub fn set_packet_length(&mut self, length: usize) -> &mut Self {
+        assert!(
+            length <= u16::MAX as usize,
+            "IPv4 packet max length is 65 535 bytes."
+        );
+        let length = (length as u16).to_be_bytes();
+        self.buffer.as_mut()[field::TOTAL_LENGTH].copy_from_slice(&length);
         self
     }
 
@@ -118,7 +135,8 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> IPv4Packet<T> {
     }
 
     pub fn payload_mut(&mut self) -> &mut [u8] {
-        &mut self.buffer.as_mut()[field::PAYLOAD]
+        let range = self.header_length_bytes()..self.packet_length();
+        &mut self.buffer.as_mut()[range]
     }
 }
 

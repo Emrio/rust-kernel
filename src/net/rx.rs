@@ -17,7 +17,7 @@ use crate::net::icmp::ICMPPacket;
 use crate::net::ipv4::IPv4Packet;
 use crate::net::ipv4::address::IPv4Address;
 use crate::net::ipv4::protocol::Protocol;
-use crate::net::{STATE_MACHINE, StateMachine, generate_echo_reply};
+use crate::net::{STATE_MACHINE, StateMachine, generate_arp_reply, generate_echo_reply};
 
 pub(crate) static WAKER: AtomicWaker = AtomicWaker::new();
 
@@ -66,6 +66,20 @@ pub fn process_ethernet_frame(ctx: &NetContext, frame: &EthernetFrame<&[u8]>) ->
                 {
                     kprintln!("My IPv4: {}", arp.target_protocol_address());
                     return ProcessingResult::SetIpv4(arp.target_protocol_address());
+                }
+
+                if arp.operation() == ARPOperation::Request
+                    && ctx.hardware_address().is_some()
+                    && let Some(ipv4_address) = ctx.ipv4_address()
+                    && ipv4_address == arp.target_protocol_address()
+                {
+                    kprintln!(
+                        "-> {}/{} wants my hardware address!",
+                        arp.sender_hardware_address(),
+                        arp.sender_protocol_address()
+                    );
+
+                    return ProcessingResult::Respond(generate_arp_reply(ctx, frame, &arp));
                 }
 
                 ProcessingResult::Nothing

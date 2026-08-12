@@ -12,6 +12,7 @@ mod field {
     pub const CHECKSUM: core::ops::Range<usize> = 2..4;
     pub const ECHO_IDENTIFIER: core::ops::Range<usize> = 4..6;
     pub const ECHO_SEQUENCE: core::ops::Range<usize> = 6..8;
+    pub const PAYLOAD: core::ops::RangeFrom<usize> = 4..;
 }
 
 pub const ICMP_PACKET: usize = 4;
@@ -77,6 +78,10 @@ impl<T: AsRef<[u8]>> ICMPPacket<T> {
         destination.copy_from_slice(&self.buffer.as_ref()[field::ECHO_SEQUENCE]);
         u16::from_be_bytes(destination)
     }
+
+    pub fn payload(&self) -> &[u8] {
+        &self.buffer.as_ref()[field::PAYLOAD]
+    }
 }
 
 impl<T: AsRef<[u8]> + AsMut<[u8]>> ICMPPacket<T> {
@@ -110,5 +115,29 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> ICMPPacket<T> {
     pub fn set_echo_sequence(&mut self, sequence: u16) -> &mut Self {
         self.buffer.as_mut()[field::ECHO_SEQUENCE].copy_from_slice(&sequence.to_be_bytes());
         self
+    }
+
+    pub fn set_payload(&mut self, payload: &[u8]) -> &mut Self {
+        self.buffer.as_mut()[field::PAYLOAD].copy_from_slice(payload);
+        self
+    }
+}
+
+impl<T: AsRef<[u8]>> core::fmt::Display for ICMPPacket<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        if self.is_echo_reply() || self.is_echo_request() {
+            f.write_fmt(format_args!(
+                "ICMP({}, id={}, seq={})",
+                self.icmp_type(),
+                self.echo_identifier(),
+                self.echo_sequence(),
+            ))
+        } else {
+            f.write_fmt(format_args!(
+                "ICMP(type={}, code={})",
+                self.icmp_type(),
+                self.code(),
+            ))
+        }
     }
 }
