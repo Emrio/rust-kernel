@@ -1,4 +1,13 @@
-use super::*;
+use crate::net::arp::{ARP_PACKET, ARPOperation, ARPPacket, HardwareType, ProtocolType};
+use crate::net::ethernet::address::EthernetAddress;
+use crate::net::ethernet::ethertype::EtherType;
+use crate::net::ethernet::{ETHERNET_HEADER, EthernetFrame};
+use crate::net::icmp::icmp_type::IcmpType;
+use crate::net::icmp::{ECHO_PACKET, ICMPPacket};
+use crate::net::ipv4::address::IPv4Address;
+use crate::net::ipv4::protocol::Protocol;
+use crate::net::ipv4::{IPV4_PACKET, IPv4Packet};
+use crate::net::rx::{NetContext, ProcessingResult, process_ethernet_frame};
 
 #[test_case]
 fn icmp_echo_request_is_met_with_reply() {
@@ -22,8 +31,8 @@ fn icmp_echo_request_is_met_with_reply() {
         .compute_checksum();
     let frame = EthernetFrame::new(packet.as_slice()).unwrap();
 
-    let rx::ProcessingResult::Respond(response) =
-        rx::process_ethernet_frame(&NetContext::default(), &frame)
+    let ProcessingResult::Respond(response) =
+        process_ethernet_frame(&NetContext::default(), &frame)
     else {
         panic!("Expected response")
     };
@@ -72,7 +81,7 @@ fn arp_request_for_me_is_met_with_reply() {
     let frame = EthernetFrame::new(packet.as_slice()).unwrap();
 
     let ctx = NetContext::from_addresses(Some(target_hw), Some(target_ip));
-    let rx::ProcessingResult::Respond(response) = rx::process_ethernet_frame(&ctx, &frame) else {
+    let ProcessingResult::Respond(response) = process_ethernet_frame(&ctx, &frame) else {
         panic!("Expected response")
     };
 

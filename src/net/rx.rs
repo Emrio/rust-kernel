@@ -17,7 +17,8 @@ use crate::net::icmp::ICMPPacket;
 use crate::net::ipv4::IPv4Packet;
 use crate::net::ipv4::address::IPv4Address;
 use crate::net::ipv4::protocol::Protocol;
-use crate::net::{STATE_MACHINE, StateMachine, generate_arp_reply, generate_echo_reply};
+use crate::net::tx::{generate_arp_reply, generate_echo_reply};
+use crate::net::{STATE_MACHINE, StateMachine};
 
 pub(crate) static WAKER: AtomicWaker = AtomicWaker::new();
 
