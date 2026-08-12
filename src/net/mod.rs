@@ -1,24 +1,63 @@
+extern crate alloc;
+
+use alloc::vec;
+use alloc::vec::Vec;
 use core::time::Duration;
 
-use crate::{
-    drivers::i82540em::DEVICE,
-    net::{
-        arp::{ARP_PACKET, ARPOperation, ARPPacket, HardwareType, ProtocolType},
-        device::NetworkDevice,
-        ethernet::{
-            ETHERNET_HEADER, EthernetFrame, address::EthernetAddress, ethertype::EtherType,
-        },
-        ipv4::address::IPv4Address,
-    },
-    time::{Instant, sleep},
-};
+use crate::drivers::i82540em::DEVICE;
+use crate::time::{Instant, sleep};
+use arp::{ARP_PACKET, ARPOperation, ARPPacket, HardwareType, ProtocolType};
+use device::NetworkDevice;
+use ethernet::{ETHERNET_HEADER, EthernetFrame, address::EthernetAddress, ethertype::EtherType};
+use icmp::{ECHO_PACKET, ICMPPacket, icmp_type::IcmpType};
+use ipv4::{IPV4_PACKET, IPv4Packet, address::IPv4Address, protocol::Protocol, ttl::TimeToLive};
+use rx::NetContext;
 
 pub mod arp;
+pub mod checksum;
 pub mod device;
 pub mod error;
 pub mod ethernet;
+pub mod icmp;
 pub mod ipv4;
-pub(crate) mod rx;
+pub mod rx;
+#[cfg(test)]
+mod tests;
+
+pub fn generate_echo_reply(
+    ctx: &NetContext,
+    request_frame: &EthernetFrame<&[u8]>,
+    request_ipv4: &IPv4Packet<&[u8]>,
+    request_echo: &ICMPPacket<&[u8]>,
+) -> EthernetFrame<Vec<u8>> {
+    let packet = vec![0u8; ETHERNET_HEADER + IPV4_PACKET + ECHO_PACKET];
+    let mut frame = EthernetFrame::new(packet).unwrap();
+
+    frame
+        .set_destination(request_frame.source())
+        .set_source(
+            ctx.hardware_address()
+                .unwrap_or(request_frame.destination()),
+        )
+        .set_ethertype(EtherType::IPv4);
+
+    let mut ipv4 = IPv4Packet::new(frame.payload_mut()).unwrap();
+    ipv4.set_version_and_length()
+        .set_protocol(Protocol::ICMP)
+        .set_destination(request_ipv4.source())
+        .set_source(ctx.ipv4_address().unwrap_or(request_ipv4.destination()))
+        .set_ttl(TimeToLive::max())
+        .compute_checksum();
+
+    let mut icmp = ICMPPacket::new(ipv4.payload_mut()).unwrap();
+    icmp.set_code(0)
+        .set_icmp_type(IcmpType::EchoReply)
+        .set_echo_identifier(request_echo.echo_identifier())
+        .set_echo_sequence(request_echo.echo_sequence())
+        .compute_checksum();
+
+    frame
+}
 
 pub fn send_arp_request(device: &impl NetworkDevice) {
     kprintln!("< ARP Request:");

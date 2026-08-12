@@ -46,8 +46,9 @@ entry_point!(test_kernel_main);
 
 /// Entry point for `cargo test`
 #[cfg(test)]
-fn test_kernel_main(_boot_info: &'static BootInfo) -> ! {
+fn test_kernel_main(boot_info: &'static BootInfo) -> ! {
     super::init();
+    super::memory::init_memory(boot_info.physical_memory_offset, &boot_info.memory_map);
     super::test_main();
     super::hlt_loop()
 }

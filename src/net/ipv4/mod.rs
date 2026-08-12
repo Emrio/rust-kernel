@@ -1,10 +1,10 @@
 pub mod address;
 pub mod protocol;
+pub mod ttl;
 
-use crate::net::{
-    error::BufferTooSmall,
-    ipv4::{address::IPv4Address, protocol::Protocol},
-};
+use crate::net::checksum::checksum;
+use crate::net::error::BufferTooSmall;
+use crate::net::ipv4::{address::IPv4Address, protocol::Protocol, ttl::TimeToLive};
 
 pub struct IPv4Packet<T: AsRef<[u8]>> {
     buffer: T,
@@ -18,9 +18,9 @@ mod field {
     // pub const ID: core::ops::Range<usize> = 4..6;
     // pub const FLAGS: usize = 6; // first 3 bits
     // pub const FRAGMENT_OFFSET: core::ops::Range<usize> = 6..8; // last 13 bits
-    // pub const TTL: usize = 8;
+    pub const TTL: usize = 8;
     pub const PROTOCOL: core::ops::Range<usize> = 9..10;
-    // pub const CHECKSUM: core::ops::Range<usize> = 10..12;
+    pub const CHECKSUM: core::ops::Range<usize> = 10..12;
     pub const SOURCE: core::ops::Range<usize> = 12..16;
     pub const DESTINATION: core::ops::Range<usize> = 16..20;
     pub const PAYLOAD: core::ops::RangeFrom<usize> = 20..;
@@ -59,12 +59,16 @@ impl<T: AsRef<[u8]>> IPv4Packet<T> {
         self.buffer.as_ref()[field::IHL] & 0x0f
     }
 
-    pub fn header_length_bytes(&self) -> u8 {
-        self.header_length() * 4
+    pub fn header_length_bytes(&self) -> usize {
+        self.header_length() as usize * 4
     }
 
     pub fn protocol(&self) -> Protocol {
         Protocol::from_bytes(&self.buffer.as_ref()[field::PROTOCOL])
+    }
+
+    pub fn ttl(&self) -> TimeToLive {
+        TimeToLive::new(self.buffer.as_ref()[field::TTL])
     }
 
     pub fn destination(&self) -> IPv4Address {
@@ -81,6 +85,11 @@ impl<T: AsRef<[u8]>> IPv4Packet<T> {
 }
 
 impl<T: AsRef<[u8]> + AsMut<[u8]>> IPv4Packet<T> {
+    pub fn set_version_and_length(&mut self) -> &mut Self {
+        self.buffer.as_mut()[field::VERSION] = (4 << 4) + 5;
+        self
+    }
+
     pub fn set_protocol(&mut self, protcol: Protocol) -> &mut Self {
         self.buffer.as_mut()[field::PROTOCOL].copy_from_slice(&protcol.as_bytes());
         self
@@ -96,6 +105,18 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> IPv4Packet<T> {
         self
     }
 
+    pub fn set_ttl(&mut self, ttl: TimeToLive) -> &mut Self {
+        self.buffer.as_mut()[field::TTL] = ttl.as_u8();
+        self
+    }
+
+    pub fn compute_checksum(&mut self) -> &mut Self {
+        self.buffer.as_mut()[field::CHECKSUM].copy_from_slice(&[0, 0]);
+        let csum = checksum(&self.buffer.as_ref()[..self.header_length_bytes()]);
+        self.buffer.as_mut()[field::CHECKSUM].copy_from_slice(&csum.to_be_bytes());
+        self
+    }
+
     pub fn payload_mut(&mut self) -> &mut [u8] {
         &mut self.buffer.as_mut()[field::PAYLOAD]
     }
@@ -104,10 +125,11 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> IPv4Packet<T> {
 impl<T: AsRef<[u8]>> core::fmt::Display for IPv4Packet<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!(
-            "IPv4(source={}, destination={}, protocol={})",
+            "IPv4(source={}, destination={}, protocol={}, ttl={})",
             self.source(),
             self.destination(),
-            self.protocol()
+            self.protocol(),
+            self.ttl()
         ))
     }
 }
