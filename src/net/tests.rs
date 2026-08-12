@@ -45,3 +45,48 @@ fn icmp_echo_request_is_met_with_reply() {
         ]
     );
 }
+
+#[test_case]
+fn arp_request_for_me_is_met_with_reply() {
+    let target_hw = EthernetAddress::from_bytes(&[7, 8, 9, 10, 11, 12]);
+    let target_ip = IPv4Address::new(10, 0, 2, 3);
+    let sender_hw = EthernetAddress::from_bytes(&[1, 2, 3, 4, 5, 6]);
+    let sender_ip = IPv4Address::new(10, 0, 2, 2);
+
+    let mut packet = [0; ETHERNET_HEADER + ARP_PACKET];
+    let mut frame = EthernetFrame::new(&mut packet).unwrap();
+    frame
+        .set_destination(EthernetAddress::BROADCAST)
+        .set_source(sender_hw)
+        .set_ethertype(EtherType::ARP);
+    let mut arp = ARPPacket::new(frame.payload_mut()).unwrap();
+    arp.set_hardware_type(HardwareType::Ethernet)
+        .set_protocol_type(ProtocolType::IPv4)
+        .set_hardware_length(EthernetAddress::SIZE as u8)
+        .set_protocol_length(IPv4Address::SIZE as u8)
+        .set_operation(ARPOperation::Request)
+        .set_sender_hardware_address(sender_hw)
+        .set_sender_protocol_address(sender_ip)
+        .set_target_hardware_address(EthernetAddress::BROADCAST)
+        .set_target_protocol_address(target_ip);
+    let frame = EthernetFrame::new(packet.as_slice()).unwrap();
+
+    let ctx = NetContext::from_addresses(Some(target_hw), Some(target_ip));
+    let rx::ProcessingResult::Respond(response) = rx::process_ethernet_frame(&ctx, &frame) else {
+        panic!("Expected response")
+    };
+
+    assert_eq!(response.source(), target_hw);
+    assert_eq!(response.destination(), frame.source());
+    let Ok(arp_response) = ARPPacket::new(response.payload()) else {
+        panic!("Expected ARP response")
+    };
+
+    assert_eq!(arp_response.hardware_type(), HardwareType::Ethernet);
+    assert_eq!(arp_response.protocol_type(), ProtocolType::IPv4);
+    assert_eq!(arp_response.operation(), ARPOperation::Reply);
+    assert_eq!(arp_response.sender_hardware_address(), target_hw);
+    assert_eq!(arp_response.sender_protocol_address(), target_ip);
+    assert_eq!(arp_response.target_hardware_address(), sender_hw);
+    assert_eq!(arp_response.target_protocol_address(), sender_ip);
+}

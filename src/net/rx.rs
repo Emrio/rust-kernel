@@ -38,6 +38,16 @@ impl NetContext {
         }
     }
 
+    pub fn from_addresses(
+        hardware_address: Option<EthernetAddress>,
+        ipv4_address: Option<IPv4Address>,
+    ) -> Self {
+        Self {
+            ipv4_address,
+            hardware_address,
+        }
+    }
+
     pub fn ipv4_address(&self) -> Option<IPv4Address> {
         self.ipv4_address
     }
