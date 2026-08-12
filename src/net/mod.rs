@@ -61,7 +61,7 @@ pub fn generate_echo_reply(
 }
 
 pub fn send_arp_request(device: &impl NetworkDevice) {
-    kprintln!("< ARP Request:");
+    kprintln!("<- Sending ARP request");
 
     let mut packet = [0; ETHERNET_HEADER + ARP_PACKET];
     let mut frame = EthernetFrame::new(&mut packet).unwrap();
@@ -70,7 +70,7 @@ pub fn send_arp_request(device: &impl NetworkDevice) {
         .set_destination(EthernetAddress::BROADCAST)
         .set_source(device.hardware_address())
         .set_ethertype(EtherType::ARP);
-    kprintln!("< {}", frame);
+    kprintln!("<- {}", frame);
 
     let mut arp = ARPPacket::new(frame.payload_mut()).unwrap();
     arp.set_hardware_type(HardwareType::Ethernet)
@@ -82,7 +82,7 @@ pub fn send_arp_request(device: &impl NetworkDevice) {
         .set_sender_protocol_address(IPv4Address::new(10, 0, 2, 3))
         .set_target_hardware_address(EthernetAddress::BROADCAST)
         .set_target_protocol_address(IPv4Address::new(10, 0, 2, 2));
-    kprintln!("< {}", arp);
+    kprintln!("<- {}", arp);
 
     device.send_packet(frame.into_inner());
 }

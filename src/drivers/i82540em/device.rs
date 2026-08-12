@@ -104,7 +104,6 @@ impl Device {
         let b2 = self.read_eeprom(2);
 
         let hwaddr = EthernetAddress::from_u16(b0, b1, b2);
-        kprintln!("{hwaddr}");
 
         self.write_register(I8254_REG_RAL, (b1 as u32) << 16 | (b0 as u32));
         self.write_register(I8254_REG_RAH, b2 as u32 | /* Address valid */ (1 << 31));

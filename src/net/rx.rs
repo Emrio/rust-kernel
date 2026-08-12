@@ -54,17 +54,19 @@ pub enum ProcessingResult {
 }
 
 pub fn process_ethernet_frame(ctx: &NetContext, frame: &EthernetFrame<&[u8]>) -> ProcessingResult {
+    kprintln!("-> Ethernet frame: {}", frame);
+
     match frame.ethertype() {
         EtherType::ARP => match ARPPacket::new(frame.payload()) {
             Ok(arp) => {
-                kprintln!("ARP packet: {}", arp);
+                kprintln!("-> ARP packet: {}", arp);
 
                 if arp.operation() == ARPOperation::Reply
                     && ctx.ipv4_address().is_none()
                     && let Some(hardware_address) = ctx.hardware_address()
                     && arp.target_hardware_address() == hardware_address
                 {
-                    kprintln!("My IPv4: {}", arp.target_protocol_address());
+                    kprintln!("-> My IPv4: {}", arp.target_protocol_address());
                     return ProcessingResult::SetIpv4(arp.target_protocol_address());
                 }
 
@@ -86,36 +88,33 @@ pub fn process_ethernet_frame(ctx: &NetContext, frame: &EthernetFrame<&[u8]>) ->
             }
 
             Err(BufferTooSmall) => {
-                kprintln!("Error: ARP packet too small!");
+                kprintln!("-> Error: ARP packet too small!");
                 ProcessingResult::Nothing
             }
         },
 
         EtherType::IPv4 => match IPv4Packet::new(frame.payload()) {
             Ok(ipv4) => {
-                kprintln!("IPv4 packet: {}", ipv4);
+                kprintln!("-> IPv4 packet: {}", ipv4);
 
                 match ipv4.protocol() {
                     Protocol::ICMP => match ICMPPacket::new(ipv4.payload()) {
                         Ok(icmp) => {
-                            if icmp.is_echo_reply() {
-                                kprintln!("Echo reply!");
-                                return ProcessingResult::Nothing;
-                            }
+                            kprintln!("-> ICMP packet: {}", icmp);
 
                             if icmp.is_echo_request() {
-                                kprintln!("Echo request, generating response!");
+                                kprintln!("-> Echo request, generating response!");
                                 return ProcessingResult::Respond(generate_echo_reply(
                                     ctx, frame, &ipv4, &icmp,
                                 ));
                             }
 
-                            kprintln!("ICMP packet is not echo: {}", icmp.icmp_type());
+                            kprintln!("-> ICMP packet is not echo request");
                             ProcessingResult::Nothing
                         }
 
                         Err(BufferTooSmall) => {
-                            kprintln!("Error: ICMP packet too small!");
+                            kprintln!("-> Error: ICMP packet too small!");
                             ProcessingResult::Nothing
                         }
                     },
@@ -126,7 +125,7 @@ pub fn process_ethernet_frame(ctx: &NetContext, frame: &EthernetFrame<&[u8]>) ->
                 }
             }
             Err(BufferTooSmall) => {
-                kprintln!("Error: IPv4 packet too small!");
+                kprintln!("-> Error: IPv4 packet too small!");
                 ProcessingResult::Nothing
             }
         },
@@ -134,11 +133,12 @@ pub fn process_ethernet_frame(ctx: &NetContext, frame: &EthernetFrame<&[u8]>) ->
 }
 
 pub fn handle_incoming_ethernet_packet(buffer: &[u8]) {
-    kprintln!("> Processing incoming packet...");
+    kprintln!("-> Processing incoming packet...");
+    // kprintln!("-> {:02x?} (size: {})", buffer, buffer.len());
 
     let Ok(frame) = EthernetFrame::new(buffer) else {
         kprintln!(
-            "Error: Couldn't parse incoming frame of size {}",
+            "-> Error: Couldn't parse incoming frame of size {}",
             buffer.len()
         );
         return;
@@ -154,12 +154,10 @@ pub fn handle_incoming_ethernet_packet(buffer: &[u8]) {
             if let Some(device) = device {
                 device.send_packet(&ethernet_frame.into_inner())
             } else {
-                kprintln!("Error: I want to send a response but I don't have any device")
+                kprintln!("-> Error: I want to send a response but I don't have any device")
             }
         }
     }
-
-    kprintln!("> OK");
 }
 
 struct RxStream;
