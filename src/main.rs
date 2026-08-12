@@ -20,15 +20,13 @@ entry_point!(kmain);
 
 fn kmain(boot_info: &'static BootInfo) -> ! {
     init();
-
-    kprintln!("Hello World{}", "!");
-
     init_memory(boot_info.physical_memory_offset, &boot_info.memory_map);
+    block_on(init_time());
+
+    kprintln!("Hello, world!");
 
     #[cfg(test)]
     test_main();
-
-    block_on(init_time());
 
     rust_kernel::drivers::i82540em::find_and_setup_ethernet_controller();
     block_on(join!(
