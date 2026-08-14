@@ -22,29 +22,30 @@ use crate::net::{STATE_MACHINE, StateMachine};
 
 pub(crate) static WAKER: AtomicWaker = AtomicWaker::new();
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct NetContext {
     ipv4_address: Option<IPv4Address>,
-    hardware_address: Option<EthernetAddress>,
+    hardware_address: EthernetAddress,
 }
 
 impl NetContext {
-    pub fn from_device_and_state(
-        device: Option<&impl NetworkDevice>,
-        state: &StateMachine,
-    ) -> Self {
+    pub fn from_device_and_state(device: &impl NetworkDevice, state: &StateMachine) -> Self {
         Self {
             ipv4_address: state.ipv4,
-            hardware_address: device.map(|device| device.hardware_address()),
+            hardware_address: device.hardware_address(),
         }
     }
 
-    pub fn from_addresses(
-        hardware_address: Option<EthernetAddress>,
-        ipv4_address: Option<IPv4Address>,
-    ) -> Self {
+    pub fn from_addresses(hardware_address: EthernetAddress, ipv4_address: IPv4Address) -> Self {
         Self {
-            ipv4_address,
+            ipv4_address: Some(ipv4_address),
+            hardware_address,
+        }
+    }
+
+    pub fn from_hardware_address(hardware_address: EthernetAddress) -> Self {
+        Self {
+            ipv4_address: None,
             hardware_address,
         }
     }
@@ -53,7 +54,7 @@ impl NetContext {
         self.ipv4_address
     }
 
-    pub fn hardware_address(&self) -> Option<EthernetAddress> {
+    pub fn hardware_address(&self) -> EthernetAddress {
         self.hardware_address
     }
 }
@@ -70,12 +71,7 @@ pub fn process_ethernet_frame(
 ) -> Result<ProcessingResult, BufferTooSmall> {
     kprintln!("-> Ethernet frame: {}", frame);
 
-    if !frame.destination().is_broadcast()
-        && !ctx
-            .hardware_address()
-            .map(|address| address == frame.destination())
-            .unwrap_or(false)
-    {
+    if !frame.destination().is_broadcast() && frame.destination() != ctx.hardware_address() {
         kprintln!("-> This frame is not for me.");
         return Ok(ProcessingResult::Nothing);
     }
@@ -88,15 +84,13 @@ pub fn process_ethernet_frame(
 
             if arp.operation() == ARPOperation::Reply
                 && ctx.ipv4_address().is_none()
-                && let Some(hardware_address) = ctx.hardware_address()
-                && arp.target_hardware_address() == hardware_address
+                && arp.target_hardware_address() == ctx.hardware_address()
             {
                 kprintln!("-> My IPv4: {}", arp.target_protocol_address());
                 return Ok(ProcessingResult::SetIpv4(arp.target_protocol_address()));
             }
 
             if arp.operation() == ARPOperation::Request
-                && ctx.hardware_address().is_some()
                 && let Some(ipv4_address) = ctx.ipv4_address()
                 && ipv4_address == arp.target_protocol_address()
             {
@@ -108,7 +102,7 @@ pub fn process_ethernet_frame(
 
                 return Ok(ProcessingResult::Respond(generate_arp_reply(
                     ctx, frame, &arp,
-                )));
+                )?));
             }
 
             Ok(ProcessingResult::Nothing)
@@ -135,7 +129,7 @@ pub fn process_ethernet_frame(
                         kprintln!("-> Echo request, generating response!");
                         return Ok(ProcessingResult::Respond(generate_echo_reply(
                             ctx, frame, &ipv4, &icmp,
-                        )));
+                        )?));
                     }
 
                     kprintln!("-> ICMP packet is not echo request");
@@ -163,17 +157,13 @@ pub fn handle_incoming_ethernet_packet(buffer: &[u8]) {
     };
 
     let mut state = STATE_MACHINE.lock();
-    let device = DEVICE.get();
+    let device = DEVICE.get().expect("device to be ready");
     let context = NetContext::from_device_and_state(device, &state);
     match process_ethernet_frame(&context, &frame) {
         Ok(ProcessingResult::Nothing) => {}
         Ok(ProcessingResult::SetIpv4(ipv4_address)) => state.ipv4 = Some(ipv4_address),
         Ok(ProcessingResult::Respond(ethernet_frame)) => {
-            if let Some(device) = device {
-                device.send_packet(&ethernet_frame.into_inner())
-            } else {
-                kprintln!("-> Error: I want to send a response but I don't have any device")
-            }
+            device.send_packet(&ethernet_frame.into_inner())
         }
         Err(BufferTooSmall) => {
             kprintln!("-> Err: Could not decode packet: the packet is too small")

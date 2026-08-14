@@ -11,10 +11,11 @@ use crate::net::rx::{NetContext, ProcessingResult, process_ethernet_frame};
 
 #[test_case]
 fn icmp_echo_request_is_met_with_reply() {
+    let my_hardware_address = EthernetAddress::from_bytes(&[1, 2, 3, 4, 5, 6]);
     let mut packet = [0; ETHERNET_HEADER + IPV4_PACKET + ECHO_PACKET];
     let mut frame = EthernetFrame::new(&mut packet).unwrap();
     frame
-        .set_destination(EthernetAddress::from_bytes(&[1, 2, 3, 4, 5, 6]))
+        .set_destination(my_hardware_address)
         .set_source(EthernetAddress::from_bytes(&[7, 8, 9, 10, 11, 12]))
         .set_ethertype(EtherType::IPv4);
     let mut ipv4 = IPv4Packet::new(frame.payload_mut()).unwrap();
@@ -31,9 +32,10 @@ fn icmp_echo_request_is_met_with_reply() {
         .compute_checksum();
     let frame = EthernetFrame::new(packet.as_slice()).unwrap();
 
-    let Ok(ProcessingResult::Respond(response)) =
-        process_ethernet_frame(&NetContext::default(), &frame)
-    else {
+    let Ok(ProcessingResult::Respond(response)) = process_ethernet_frame(
+        &NetContext::from_hardware_address(my_hardware_address),
+        &frame,
+    ) else {
         panic!("Expected response")
     };
 
@@ -80,7 +82,7 @@ fn arp_request_for_me_is_met_with_reply() {
         .set_target_protocol_address(target_ip);
     let frame = EthernetFrame::new(packet.as_slice()).unwrap();
 
-    let ctx = NetContext::from_addresses(Some(target_hw), Some(target_ip));
+    let ctx = NetContext::from_addresses(target_hw, target_ip);
     let Ok(ProcessingResult::Respond(response)) = process_ethernet_frame(&ctx, &frame) else {
         panic!("Expected response")
     };
