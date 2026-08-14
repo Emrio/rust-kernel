@@ -31,7 +31,7 @@ fn icmp_echo_request_is_met_with_reply() {
         .compute_checksum();
     let frame = EthernetFrame::new(packet.as_slice()).unwrap();
 
-    let ProcessingResult::Respond(response) =
+    let Ok(ProcessingResult::Respond(response)) =
         process_ethernet_frame(&NetContext::default(), &frame)
     else {
         panic!("Expected response")
@@ -81,7 +81,7 @@ fn arp_request_for_me_is_met_with_reply() {
     let frame = EthernetFrame::new(packet.as_slice()).unwrap();
 
     let ctx = NetContext::from_addresses(Some(target_hw), Some(target_ip));
-    let ProcessingResult::Respond(response) = process_ethernet_frame(&ctx, &frame) else {
+    let Ok(ProcessingResult::Respond(response)) = process_ethernet_frame(&ctx, &frame) else {
         panic!("Expected response")
     };
 

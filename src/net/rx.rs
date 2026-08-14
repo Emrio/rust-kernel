@@ -64,82 +64,89 @@ pub enum ProcessingResult {
     Respond(EthernetFrame<Vec<u8>>),
 }
 
-pub fn process_ethernet_frame(ctx: &NetContext, frame: &EthernetFrame<&[u8]>) -> ProcessingResult {
+pub fn process_ethernet_frame(
+    ctx: &NetContext,
+    frame: &EthernetFrame<&[u8]>,
+) -> Result<ProcessingResult, BufferTooSmall> {
     kprintln!("-> Ethernet frame: {}", frame);
 
+    if !frame.destination().is_broadcast()
+        && !ctx
+            .hardware_address()
+            .map(|address| address == frame.destination())
+            .unwrap_or(false)
+    {
+        kprintln!("-> This frame is not for me.");
+        return Ok(ProcessingResult::Nothing);
+    }
+
     match frame.ethertype() {
-        EtherType::ARP => match ARPPacket::new(frame.payload()) {
-            Ok(arp) => {
-                kprintln!("-> ARP packet: {}", arp);
+        EtherType::ARP => {
+            let arp = ARPPacket::new(frame.payload())?;
 
-                if arp.operation() == ARPOperation::Reply
-                    && ctx.ipv4_address().is_none()
-                    && let Some(hardware_address) = ctx.hardware_address()
-                    && arp.target_hardware_address() == hardware_address
-                {
-                    kprintln!("-> My IPv4: {}", arp.target_protocol_address());
-                    return ProcessingResult::SetIpv4(arp.target_protocol_address());
+            kprintln!("-> ARP packet: {}", arp);
+
+            if arp.operation() == ARPOperation::Reply
+                && ctx.ipv4_address().is_none()
+                && let Some(hardware_address) = ctx.hardware_address()
+                && arp.target_hardware_address() == hardware_address
+            {
+                kprintln!("-> My IPv4: {}", arp.target_protocol_address());
+                return Ok(ProcessingResult::SetIpv4(arp.target_protocol_address()));
+            }
+
+            if arp.operation() == ARPOperation::Request
+                && ctx.hardware_address().is_some()
+                && let Some(ipv4_address) = ctx.ipv4_address()
+                && ipv4_address == arp.target_protocol_address()
+            {
+                kprintln!(
+                    "-> {}/{} wants my hardware address!",
+                    arp.sender_hardware_address(),
+                    arp.sender_protocol_address()
+                );
+
+                return Ok(ProcessingResult::Respond(generate_arp_reply(
+                    ctx, frame, &arp,
+                )));
+            }
+
+            Ok(ProcessingResult::Nothing)
+        }
+
+        EtherType::IPv4 => {
+            let ipv4 = IPv4Packet::new(frame.payload())?;
+            kprintln!("-> IPv4 packet: {}", ipv4);
+
+            if let Some(ipv4_address) = ctx.ipv4_address()
+                && ipv4_address != ipv4.destination()
+            {
+                kprintln!("-> IP packet is not for me");
+                return Ok(ProcessingResult::Nothing);
+            }
+
+            match ipv4.protocol() {
+                Protocol::ICMP => {
+                    let icmp = ICMPPacket::new(ipv4.payload())?;
+
+                    kprintln!("-> ICMP packet: {}", icmp);
+
+                    if icmp.is_echo_request() {
+                        kprintln!("-> Echo request, generating response!");
+                        return Ok(ProcessingResult::Respond(generate_echo_reply(
+                            ctx, frame, &ipv4, &icmp,
+                        )));
+                    }
+
+                    kprintln!("-> ICMP packet is not echo request");
+                    Ok(ProcessingResult::Nothing)
                 }
 
-                if arp.operation() == ARPOperation::Request
-                    && ctx.hardware_address().is_some()
-                    && let Some(ipv4_address) = ctx.ipv4_address()
-                    && ipv4_address == arp.target_protocol_address()
-                {
-                    kprintln!(
-                        "-> {}/{} wants my hardware address!",
-                        arp.sender_hardware_address(),
-                        arp.sender_protocol_address()
-                    );
+                Protocol::TCP => todo!(),
 
-                    return ProcessingResult::Respond(generate_arp_reply(ctx, frame, &arp));
-                }
-
-                ProcessingResult::Nothing
+                Protocol::UDP => todo!(),
             }
-
-            Err(BufferTooSmall) => {
-                kprintln!("-> Error: ARP packet too small!");
-                ProcessingResult::Nothing
-            }
-        },
-
-        EtherType::IPv4 => match IPv4Packet::new(frame.payload()) {
-            Ok(ipv4) => {
-                kprintln!("-> IPv4 packet: {}", ipv4);
-
-                match ipv4.protocol() {
-                    Protocol::ICMP => match ICMPPacket::new(ipv4.payload()) {
-                        Ok(icmp) => {
-                            kprintln!("-> ICMP packet: {}", icmp);
-
-                            if icmp.is_echo_request() {
-                                kprintln!("-> Echo request, generating response!");
-                                return ProcessingResult::Respond(generate_echo_reply(
-                                    ctx, frame, &ipv4, &icmp,
-                                ));
-                            }
-
-                            kprintln!("-> ICMP packet is not echo request");
-                            ProcessingResult::Nothing
-                        }
-
-                        Err(BufferTooSmall) => {
-                            kprintln!("-> Error: ICMP packet too small!");
-                            ProcessingResult::Nothing
-                        }
-                    },
-
-                    Protocol::TCP => todo!(),
-
-                    Protocol::UDP => todo!(),
-                }
-            }
-            Err(BufferTooSmall) => {
-                kprintln!("-> Error: IPv4 packet too small!");
-                ProcessingResult::Nothing
-            }
-        },
+        }
     }
 }
 
@@ -159,14 +166,17 @@ pub fn handle_incoming_ethernet_packet(buffer: &[u8]) {
     let device = DEVICE.get();
     let context = NetContext::from_device_and_state(device, &state);
     match process_ethernet_frame(&context, &frame) {
-        ProcessingResult::Nothing => {}
-        ProcessingResult::SetIpv4(ipv4_address) => state.ipv4 = Some(ipv4_address),
-        ProcessingResult::Respond(ethernet_frame) => {
+        Ok(ProcessingResult::Nothing) => {}
+        Ok(ProcessingResult::SetIpv4(ipv4_address)) => state.ipv4 = Some(ipv4_address),
+        Ok(ProcessingResult::Respond(ethernet_frame)) => {
             if let Some(device) = device {
                 device.send_packet(&ethernet_frame.into_inner())
             } else {
                 kprintln!("-> Error: I want to send a response but I don't have any device")
             }
+        }
+        Err(BufferTooSmall) => {
+            kprintln!("-> Err: Could not decode packet: the packet is too small")
         }
     }
 }
