@@ -1,14 +1,16 @@
 use crate::bits::Split;
 
+pub const ADDRESS_SIZE: usize = 6;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EthernetAddress([u8; 6]);
+pub struct EthernetAddress([u8; ADDRESS_SIZE]);
 
 impl EthernetAddress {
-    pub const BROADCAST: EthernetAddress = EthernetAddress([0xff; 6]);
+    pub const BROADCAST: EthernetAddress = EthernetAddress([0xff; ADDRESS_SIZE]);
     pub const SIZE: usize = core::mem::size_of::<EthernetAddress>();
 
     pub fn from_bytes(bytes: &[u8]) -> Self {
-        let mut address = [0; 6];
+        let mut address = [0; ADDRESS_SIZE];
         address.copy_from_slice(bytes);
         Self(address)
     }
