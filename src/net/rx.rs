@@ -128,9 +128,9 @@ pub fn process_ethernet_frame(
 
                     if icmp.is_echo_request() {
                         kprintln!("-> Echo request, generating response!");
-                        return Ok(ProcessingResult::Respond(
-                            generate_echo_reply(ctx, frame, &ipv4, &icmp)?.into_inner(),
-                        ));
+                        return Ok(ProcessingResult::Respond(generate_echo_reply(
+                            ctx, frame, &ipv4, &icmp,
+                        )?));
                     }
 
                     kprintln!("-> ICMP packet is not echo request");
@@ -143,9 +143,9 @@ pub fn process_ethernet_frame(
                     let udp = UDPPacket::new(ipv4.payload())?;
                     kprintln!("-> UDP packet: {}", udp);
 
-                    Ok(ProcessingResult::Respond(
-                        generate_pong_udp_packet(ctx, frame, &ipv4, &udp)?.into_inner(),
-                    ))
+                    Ok(ProcessingResult::Respond(generate_pong_udp_packet(
+                        ctx, frame, &ipv4, &udp,
+                    )?))
                 }
             }
         }

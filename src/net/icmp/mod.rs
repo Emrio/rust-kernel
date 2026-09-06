@@ -121,6 +121,10 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> ICMPPacket<T> {
         self.buffer.as_mut()[field::PAYLOAD].copy_from_slice(payload);
         self
     }
+
+    pub fn payload_mut(&mut self) -> &mut [u8] {
+        &mut self.buffer.as_mut()[field::PAYLOAD]
+    }
 }
 
 impl<T: AsRef<[u8]>> core::fmt::Display for ICMPPacket<T> {
