@@ -22,54 +22,39 @@ pub fn generate_arp_reply(
     ctx: &NetContext,
     request_frame: &EthernetFrame<&[u8]>,
     request_arp: &ARPPacket<&[u8]>,
-) -> Result<EthernetFrame<Vec<u8>>, BufferTooSmall> {
-    let packet = vec![0; ETHERNET_HEADER + ARP_PACKET];
-    let mut frame = EthernetFrame::new(packet)?;
-
-    frame
-        .set_destination(request_frame.source())
-        .set_source(ctx.hardware_address())
-        .set_ethertype(EtherType::ARP);
-
-    let mut arp = ARPPacket::new(frame.payload_mut())?;
-    arp.set_hardware_type(HardwareType::Ethernet)
-        .set_protocol_type(ProtocolType::IPv4)
-        .set_hardware_length(EthernetAddress::SIZE as u8)
-        .set_protocol_length(IPv4Address::SIZE as u8)
-        .set_operation(ARPOperation::Reply)
-        .set_sender_hardware_address(ctx.hardware_address())
-        .set_sender_protocol_address(request_arp.target_protocol_address())
-        .set_target_hardware_address(request_arp.sender_hardware_address())
-        .set_target_protocol_address(request_arp.sender_protocol_address());
-
-    Ok(frame)
+) -> Result<Vec<u8>, BufferTooSmall> {
+    build(L2::Ethernet {
+        source: ctx.hardware_address(),
+        destination: request_frame.source(),
+        ethertype: EtherType::ARP,
+        next: L3::Arp {
+            operation: ARPOperation::Reply,
+            sender_hardware_address: ctx.hardware_address(),
+            sender_protocol_address: request_arp.target_protocol_address(),
+            target_hardware_address: request_arp.sender_hardware_address(),
+            target_protocol_address: request_arp.sender_protocol_address(),
+        },
+    })
 }
 
 pub fn send_arp_request(device: &impl NetworkDevice) {
     kprintln!("<- Sending ARP request");
 
-    let mut packet = [0; ETHERNET_HEADER + ARP_PACKET];
-    let mut frame = EthernetFrame::new(&mut packet).unwrap();
+    let packet = build(L2::Ethernet {
+        source: device.hardware_address(),
+        destination: EthernetAddress::BROADCAST,
+        ethertype: EtherType::ARP,
+        next: L3::Arp {
+            operation: ARPOperation::Request,
+            sender_hardware_address: device.hardware_address(),
+            sender_protocol_address: IPv4Address::new(10, 0, 2, 3),
+            target_hardware_address: EthernetAddress::BROADCAST,
+            target_protocol_address: IPv4Address::new(10, 0, 2, 2),
+        },
+    })
+    .unwrap();
 
-    frame
-        .set_destination(EthernetAddress::BROADCAST)
-        .set_source(device.hardware_address())
-        .set_ethertype(EtherType::ARP);
-    kprintln!("<- {}", frame);
-
-    let mut arp = ARPPacket::new(frame.payload_mut()).unwrap();
-    arp.set_hardware_type(HardwareType::Ethernet)
-        .set_protocol_type(ProtocolType::IPv4)
-        .set_hardware_length(EthernetAddress::SIZE as u8)
-        .set_protocol_length(IPv4Address::SIZE as u8)
-        .set_operation(ARPOperation::Request)
-        .set_sender_hardware_address(device.hardware_address())
-        .set_sender_protocol_address(IPv4Address::new(10, 0, 2, 3))
-        .set_target_hardware_address(EthernetAddress::BROADCAST)
-        .set_target_protocol_address(IPv4Address::new(10, 0, 2, 2));
-    kprintln!("<- {}", arp);
-
-    device.send_packet(frame.into_inner());
+    device.send_packet(&packet);
 }
 
 pub fn generate_echo_reply(
@@ -159,12 +144,20 @@ enum L3 {
         protocol: Protocol,
         next: L4,
     },
+    Arp {
+        operation: ARPOperation,
+        sender_hardware_address: EthernetAddress,
+        sender_protocol_address: IPv4Address,
+        target_hardware_address: EthernetAddress,
+        target_protocol_address: IPv4Address,
+    },
 }
 
 impl L3 {
     fn size(&self) -> usize {
         match self {
             Self::IPv4 { next, .. } => IPV4_PACKET + next.size(),
+            Self::Arp { .. } => ARP_PACKET,
         }
     }
 }
@@ -249,7 +242,7 @@ fn build(l2: L2) -> Result<Vec<u8>, BufferTooSmall> {
         }
     };
 
-    let l3size = l3.size();
+    let l3size: usize = l3.size();
     let (mut l3frame, l4) = match l3 {
         L3::IPv4 {
             source,
@@ -266,6 +259,25 @@ fn build(l2: L2) -> Result<Vec<u8>, BufferTooSmall> {
                 .set_ttl(TimeToLive::max())
                 .compute_checksum();
             (L3Frame::IPv4(ipv4), next)
+        }
+        L3::Arp {
+            operation,
+            sender_hardware_address,
+            sender_protocol_address,
+            target_hardware_address,
+            target_protocol_address,
+        } => {
+            let mut arp = ARPPacket::new(l2frame.payload_mut()).unwrap();
+            arp.set_hardware_type(HardwareType::Ethernet)
+                .set_protocol_type(ProtocolType::IPv4)
+                .set_hardware_length(EthernetAddress::SIZE as u8)
+                .set_protocol_length(IPv4Address::SIZE as u8)
+                .set_operation(operation)
+                .set_sender_hardware_address(sender_hardware_address)
+                .set_sender_protocol_address(sender_protocol_address)
+                .set_target_hardware_address(target_hardware_address)
+                .set_target_protocol_address(target_protocol_address);
+            return Ok(packet);
         }
     };
 

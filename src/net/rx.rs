@@ -101,9 +101,9 @@ pub fn process_ethernet_frame(
                     arp.sender_protocol_address()
                 );
 
-                return Ok(ProcessingResult::Respond(
-                    generate_arp_reply(ctx, frame, &arp)?.into_inner(),
-                ));
+                return Ok(ProcessingResult::Respond(generate_arp_reply(
+                    ctx, frame, &arp,
+                )?));
             }
 
             Ok(ProcessingResult::Nothing)
