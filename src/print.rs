@@ -52,3 +52,12 @@ macro_rules! test_println {
 macro_rules! test_print {
     ($($arg:tt)*) => ($crate::print::_print_serial(format_args!($($arg)*)));
 }
+
+#[macro_export]
+macro_rules! dbg {
+    ($val:expr) => {{
+        let val = $val;
+        kprintln!("{}:{} {} = {:?}", file!(), line!(), stringify!($val), val);
+        val
+    }};
+}
