@@ -16,6 +16,7 @@ use crate::net::ipv4::protocol::Protocol;
 use crate::net::ipv4::ttl::TimeToLive;
 use crate::net::ipv4::{IPV4_PACKET, IPv4Packet};
 use crate::net::rx::NetContext;
+use crate::net::udp::{UDP_HEADER, UDPPacket};
 
 pub fn generate_arp_reply(
     ctx: &NetContext,
@@ -100,6 +101,45 @@ pub fn generate_echo_reply(
         .set_icmp_type(IcmpType::EchoReply)
         .set_payload(request_echo.payload())
         .compute_checksum();
+
+    Ok(frame)
+}
+
+pub fn generate_pong_udp_packet(
+    ctx: &NetContext,
+    request_frame: &EthernetFrame<&[u8]>,
+    request_ipv4: &IPv4Packet<&[u8]>,
+    request_udp: &UDPPacket<&[u8]>,
+) -> Result<EthernetFrame<Vec<u8>>, BufferTooSmall> {
+    const PREFIX: &str = "Pong: ";
+
+    assert!(request_ipv4.packet_length() >= IPV4_PACKET + UDP_HEADER);
+    let packet = vec![0u8; ETHERNET_HEADER + request_ipv4.packet_length() + PREFIX.len()];
+    let mut frame = EthernetFrame::new(packet)?;
+
+    frame
+        .set_destination(request_frame.source())
+        .set_source(ctx.hardware_address())
+        .set_ethertype(EtherType::IPv4);
+
+    let mut ipv4 = IPv4Packet::new(frame.payload_mut())?;
+    ipv4.set_version_and_length()
+        .set_packet_length(request_ipv4.packet_length() + PREFIX.len())
+        .set_protocol(Protocol::UDP)
+        .set_destination(request_ipv4.source())
+        .set_source(ctx.ipv4_address().unwrap_or(request_ipv4.destination()))
+        .set_ttl(TimeToLive::max())
+        .compute_checksum();
+
+    let mut payload = vec![0u8; request_udp.payload().len() + PREFIX.len()];
+    payload[0..PREFIX.len()].copy_from_slice(PREFIX.as_bytes());
+    payload[PREFIX.len()..].copy_from_slice(request_udp.payload());
+
+    let mut udp = UDPPacket::new(ipv4.payload_mut())?;
+    udp.set_source(request_udp.destination())
+        .set_destination(request_udp.source())
+        .set_length(request_udp.packet_length() + PREFIX.len())
+        .set_payload(&payload);
 
     Ok(frame)
 }

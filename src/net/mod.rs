@@ -13,6 +13,7 @@ pub mod icmp;
 pub mod ipv4;
 pub mod rx;
 mod tx;
+pub mod udp;
 
 #[cfg(test)]
 mod tests;

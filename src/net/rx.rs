@@ -17,7 +17,8 @@ use crate::net::icmp::ICMPPacket;
 use crate::net::ipv4::IPv4Packet;
 use crate::net::ipv4::address::IPv4Address;
 use crate::net::ipv4::protocol::Protocol;
-use crate::net::tx::{generate_arp_reply, generate_echo_reply};
+use crate::net::tx::{generate_arp_reply, generate_echo_reply, generate_pong_udp_packet};
+use crate::net::udp::UDPPacket;
 use crate::net::{STATE_MACHINE, StateMachine};
 
 pub(crate) static WAKER: AtomicWaker = AtomicWaker::new();
@@ -138,7 +139,13 @@ pub fn process_ethernet_frame(
 
                 Protocol::TCP => todo!(),
 
-                Protocol::UDP => todo!(),
+                Protocol::UDP => {
+                    let udp = UDPPacket::new(ipv4.payload())?;
+
+                    Ok(ProcessingResult::Respond(generate_pong_udp_packet(
+                        ctx, frame, &ipv4, &udp,
+                    )?))
+                }
             }
         }
     }
