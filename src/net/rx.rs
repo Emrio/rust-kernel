@@ -141,6 +141,7 @@ pub fn process_ethernet_frame(
 
                 Protocol::UDP => {
                     let udp = UDPPacket::new(ipv4.payload())?;
+                    kprintln!("-> UDP packet: {}", udp);
 
                     Ok(ProcessingResult::Respond(generate_pong_udp_packet(
                         ctx, frame, &ipv4, &udp,

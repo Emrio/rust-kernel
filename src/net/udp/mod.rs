@@ -86,4 +86,20 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> UDPPacket<T> {
         self.buffer.as_mut()[range].copy_from_slice(payload);
         self
     }
+
+    pub fn payload_mut(&mut self) -> &mut [u8] {
+        let range = UDP_HEADER..self.packet_length();
+        &mut self.buffer.as_mut()[range]
+    }
+}
+
+impl<T: AsRef<[u8]>> core::fmt::Display for UDPPacket<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_fmt(format_args!(
+            "UDP(source={}, destination={}, payload={} bytes)",
+            self.source(),
+            self.destination(),
+            self.payload().len(),
+        ))
+    }
 }
