@@ -63,7 +63,7 @@ impl NetContext {
 pub enum ProcessingResult {
     Nothing,
     SetIpv4(IPv4Address),
-    Respond(EthernetFrame<Vec<u8>>),
+    Respond(Vec<u8>),
 }
 
 pub fn process_ethernet_frame(
@@ -101,9 +101,9 @@ pub fn process_ethernet_frame(
                     arp.sender_protocol_address()
                 );
 
-                return Ok(ProcessingResult::Respond(generate_arp_reply(
-                    ctx, frame, &arp,
-                )?));
+                return Ok(ProcessingResult::Respond(
+                    generate_arp_reply(ctx, frame, &arp)?.into_inner(),
+                ));
             }
 
             Ok(ProcessingResult::Nothing)
@@ -128,9 +128,9 @@ pub fn process_ethernet_frame(
 
                     if icmp.is_echo_request() {
                         kprintln!("-> Echo request, generating response!");
-                        return Ok(ProcessingResult::Respond(generate_echo_reply(
-                            ctx, frame, &ipv4, &icmp,
-                        )?));
+                        return Ok(ProcessingResult::Respond(
+                            generate_echo_reply(ctx, frame, &ipv4, &icmp)?.into_inner(),
+                        ));
                     }
 
                     kprintln!("-> ICMP packet is not echo request");
@@ -143,9 +143,9 @@ pub fn process_ethernet_frame(
                     let udp = UDPPacket::new(ipv4.payload())?;
                     kprintln!("-> UDP packet: {}", udp);
 
-                    Ok(ProcessingResult::Respond(generate_pong_udp_packet(
-                        ctx, frame, &ipv4, &udp,
-                    )?))
+                    Ok(ProcessingResult::Respond(
+                        generate_pong_udp_packet(ctx, frame, &ipv4, &udp)?.into_inner(),
+                    ))
                 }
             }
         }
@@ -170,9 +170,7 @@ pub fn handle_incoming_ethernet_packet(buffer: &[u8]) {
     match process_ethernet_frame(&context, &frame) {
         Ok(ProcessingResult::Nothing) => {}
         Ok(ProcessingResult::SetIpv4(ipv4_address)) => state.ipv4 = Some(ipv4_address),
-        Ok(ProcessingResult::Respond(ethernet_frame)) => {
-            device.send_packet(&ethernet_frame.into_inner())
-        }
+        Ok(ProcessingResult::Respond(buffer)) => device.send_packet(&buffer),
         Err(BufferTooSmall) => {
             kprintln!("-> Err: Could not decode packet: the packet is too small")
         }

@@ -39,6 +39,8 @@ fn icmp_echo_request_is_met_with_reply() {
         panic!("Expected response")
     };
 
+    let response = EthernetFrame::new(response).expect("valid ethernet frame");
+
     assert_eq!(response.source(), frame.destination());
     assert_eq!(response.destination(), frame.source());
     assert_eq!(
@@ -86,6 +88,8 @@ fn arp_request_for_me_is_met_with_reply() {
     let Ok(ProcessingResult::Respond(response)) = process_ethernet_frame(&ctx, &frame) else {
         panic!("Expected response")
     };
+
+    let response = EthernetFrame::new(response).expect("valid ethernet frame");
 
     assert_eq!(response.source(), target_hw);
     assert_eq!(response.destination(), frame.source());
