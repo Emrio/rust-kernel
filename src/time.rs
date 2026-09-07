@@ -78,6 +78,8 @@ fn set_pit_frequency_to_target() {
 /// WARNING: It also increases the PIT interrupt frequency from 18.2 Hz to 600 Hz!
 pub async fn init_time() {
     set_pit_frequency_to_target();
+    let t0 = tsc_now();
+    T0.init_once(|| Instant(t0));
     let tsc_frequency = calibrate().await;
     TSC_FREQUENCY.init_once(|| tsc_frequency);
 }
@@ -108,6 +110,8 @@ impl TickSupport for Duration {
         ((self.as_nanos() * *frequency as u128) / 1_000_000_000) as u64
     }
 }
+
+static T0: OnceCell<Instant> = OnceCell::uninit();
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub struct Instant(u64);
@@ -156,6 +160,26 @@ impl core::ops::Sub for Instant {
     }
 }
 
+impl core::fmt::Debug for Instant {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_fmt(format_args!("Instant({self})"))
+    }
+}
+
+impl core::fmt::Display for Instant {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let t0 = T0.get().copied().unwrap_or(Instant::zero());
+
+        if self > &t0 {
+            f.write_str("t0 + ")?;
+            write_duration(&(*self - t0), f)
+        } else {
+            f.write_str("t0 - ")?;
+            write_duration(&(t0 - *self), f)
+        }
+    }
+}
+
 #[must_use = "Sleep must be awaited"]
 pub struct Sleep {
     target_tsc_tick: Instant,
@@ -180,4 +204,46 @@ pub fn sleep(delay: Duration) -> Sleep {
     Sleep {
         target_tsc_tick: Instant::now() + delay,
     }
+}
+
+fn write_duration(d: &Duration, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let total_secs = d.as_secs();
+    let nanos = d.subsec_nanos();
+
+    let days = total_secs / 86400;
+    let hours = (total_secs % 86400) / 3600;
+    let minutes = (total_secs % 3600) / 60;
+    let seconds = total_secs % 60;
+
+    let millis = nanos / 1_000_000;
+    let micros = (nanos / 1_000) % 1_000;
+    let nanos_rem = nanos % 1_000;
+
+    let mut write_count = 0;
+
+    macro_rules! write_unit {
+        ($val:expr, $suffix:expr) => {
+            if $val > 0 && write_count < 2 {
+                if write_count > 0 {
+                    write!(f, " ")?;
+                }
+                write!(f, "{}{}", $val, $suffix)?;
+                write_count += 1;
+            }
+        };
+    }
+
+    write_unit!(days, "d");
+    write_unit!(hours, "h");
+    write_unit!(minutes, "m");
+    write_unit!(seconds, "s");
+    write_unit!(millis, "ms");
+    write_unit!(micros, "µs");
+    write_unit!(nanos_rem, "ns");
+
+    if write_count == 0 {
+        write!(f, "0s")?;
+    }
+
+    Ok(())
 }
