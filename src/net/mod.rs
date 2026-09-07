@@ -59,39 +59,35 @@ async fn net_loop_logic() {
 
     let mut state_machine = STATE_MACHINE.lock();
 
-    if let DHCPStateMachine::Unconfigured(last_request) = state_machine.dhcp
-        && last_request.from_now() > Duration::from_secs(1)
-    {
-        // No DHCP configuration
+    match state_machine.dhcp {
+        DHCPStateMachine::Unconfigured(last_request)
+            if last_request.from_now() > Duration::from_secs(1) =>
+        {
+            // No DHCP configuration
+            state_machine.dhcp = DHCPStateMachine::Unconfigured(Instant::now());
 
-        state_machine.dhcp = DHCPStateMachine::Unconfigured(Instant::now());
+            let context = rx::NetContext::from_device_and_state(device, &state_machine);
+            tx::generate_dhcp_discover(&context).expect("buffer too small");
+        }
 
-        let context = rx::NetContext::from_device_and_state(device, &state_machine);
-        tx::generate_dhcp_discover(&context).expect("buffer too small");
+        DHCPStateMachine::Offered(offered_time)
+            if offered_time.from_now() > Duration::from_secs(5) =>
+        {
+            // DHCP offer was not met with ack, retrying...
+            state_machine.dhcp = DHCPStateMachine::Unconfigured(Instant::now());
+        }
 
-        return;
-    }
+        DHCPStateMachine::Assigned(DHCPConfiguration { invalid_at, .. })
+            if invalid_at < Instant::now() =>
+        {
+            // DHCP lease expired
+            state_machine.dhcp = DHCPStateMachine::Unconfigured(Instant::now());
 
-    if let DHCPStateMachine::Offered(offered_time) = state_machine.dhcp
-        && offered_time.from_now() > Duration::from_secs(5)
-    {
-        // DHCP offer was not met with ack, retrying...
-        state_machine.dhcp = DHCPStateMachine::Unconfigured(Instant::now());
+            let context = rx::NetContext::from_device_and_state(device, &state_machine);
+            tx::generate_dhcp_discover(&context).expect("buffer too small");
+        }
 
-        return;
-    }
-
-    if let DHCPStateMachine::Assigned(DHCPConfiguration { invalid_at, .. }) = state_machine.dhcp
-        && invalid_at < Instant::now()
-    {
-        // DHCP lease expired
-
-        state_machine.dhcp = DHCPStateMachine::Unconfigured(Instant::now());
-
-        let context = rx::NetContext::from_device_and_state(device, &state_machine);
-        tx::generate_dhcp_discover(&context).expect("buffer too small");
-
-        return;
+        _ => {}
     }
 }
 
