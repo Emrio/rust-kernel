@@ -1,6 +1,7 @@
 use core::time::Duration;
 
 use crate::drivers::i82540em::DEVICE;
+use crate::net::device::NetworkDevice;
 use crate::time::{Instant, sleep};
 use ipv4::address::IPv4Address;
 
@@ -67,7 +68,8 @@ async fn net_loop_logic() {
             state_machine.dhcp = DHCPStateMachine::Unconfigured(Instant::now());
 
             let context = rx::NetContext::from_device_and_state(device, &state_machine);
-            tx::generate_dhcp_discover(&context).expect("buffer too small");
+            let buffer = tx::generate_dhcp_discover(&context).expect("buffer too small");
+            device.send_packet(&buffer);
         }
 
         DHCPStateMachine::Offered(offered_time)
@@ -84,7 +86,8 @@ async fn net_loop_logic() {
             state_machine.dhcp = DHCPStateMachine::Unconfigured(Instant::now());
 
             let context = rx::NetContext::from_device_and_state(device, &state_machine);
-            tx::generate_dhcp_discover(&context).expect("buffer too small");
+            let buffer = tx::generate_dhcp_discover(&context).expect("buffer too small");
+            device.send_packet(&buffer);
         }
 
         _ => {}
