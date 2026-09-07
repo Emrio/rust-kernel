@@ -10,8 +10,6 @@
 - [x] Answer to ICMP echo
 - [x] UDP echo server
 - [x] DHCP autoconfiguration
-- [ ] ARP resolution
-- [ ] DNS resolution
 - [ ] TCP stack
 - [ ] HTTP server
 
@@ -22,6 +20,8 @@
 - [ ] Multi-NIC support, forwarding, and basic routing
 - [ ] Write uart_16550 driver from scratch
 - [ ] Multi-core
+- [ ] ARP resolution
+- [ ] DNS resolution
 
 ## Sources, ressources, and inspirations
 
