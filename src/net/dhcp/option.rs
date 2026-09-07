@@ -8,6 +8,7 @@ use core::time::Duration;
 
 use crate::net::error::BufferTooSmall;
 use crate::net::ipv4::address::IPv4Address;
+use crate::net::ipv4::mask::IPv4Mask;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -101,6 +102,7 @@ pub enum DHCPOptionError {
 
 #[derive(Debug)]
 pub enum DHCPOption {
+    Mask(IPv4Mask),
     Router(IPv4Address),
     Dns(IPv4Address),
     Hostname(String),
@@ -116,6 +118,11 @@ impl DHCPOption {
     pub fn new(code: u8, content: &[u8]) -> Result<DHCPOption, DHCPOptionError> {
         match code {
             0 => Err(DHCPOptionError::NotAnOption),
+            1 => Ok(DHCPOption::Mask(
+                content
+                    .try_into()
+                    .map_err(|_| DHCPOptionError::InvalidSize)?,
+            )),
             3 => Ok(DHCPOption::Router(
                 content
                     .try_into()
@@ -192,6 +199,13 @@ impl<T: AsRef<[u8]>> Options<T> {
 
     pub fn inner(self) -> T {
         self.buffer
+    }
+
+    pub fn get_mask(mut self) -> Option<IPv4Mask> {
+        self.find_map(|option| match option {
+            DHCPOption::Mask(mask) => Some(mask),
+            _ => None,
+        })
     }
 
     pub fn get_message_type(mut self) -> Option<MessageType> {

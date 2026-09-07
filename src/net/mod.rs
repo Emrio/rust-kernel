@@ -2,6 +2,7 @@ use core::time::Duration;
 
 use crate::drivers::i82540em::DEVICE;
 use crate::net::device::NetworkDevice;
+use crate::net::ipv4::mask::IPv4Mask;
 use crate::time::{Instant, sleep};
 use ipv4::address::IPv4Address;
 
@@ -25,6 +26,7 @@ pub use rx::rx_loop;
 pub struct DHCPConfiguration {
     invalid_at: Instant,
     ipv4: IPv4Address,
+    netmask: Option<IPv4Mask>,
     router: Option<IPv4Address>,
     dns: Option<IPv4Address>,
 }

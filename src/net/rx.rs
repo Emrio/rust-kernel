@@ -178,6 +178,7 @@ pub fn process_ethernet_frame(
                                 Ok(ProcessingResult::DHCPAccepted(DHCPConfiguration {
                                     invalid_at,
                                     ipv4: dhcp.your_address(),
+                                    netmask: dhcp.options().get_mask(),
                                     router: dhcp.options().get_router(),
                                     dns: dhcp.options().get_dns(),
                                 }))

@@ -172,6 +172,7 @@ impl<T: AsRef<[u8]>> core::fmt::Display for DHCPPacket<T> {
 
         for option in self.options() {
             match option {
+                option::DHCPOption::Mask(mask) => f.write_fmt(format_args!(", mask={mask}"))?,
                 option::DHCPOption::Router(ipv4_address) => {
                     f.write_fmt(format_args!(", router={ipv4_address}"))?
                 }
@@ -192,8 +193,8 @@ impl<T: AsRef<[u8]>> core::fmt::Display for DHCPPacket<T> {
                     f.write_fmt(format_args!(", sid={ipv4_address}"))?
                 }
                 option::DHCPOption::End => {}
-                option::DHCPOption::Unknown(_, items) => {
-                    f.write_fmt(format_args!(", unknown={items:?}"))?
+                option::DHCPOption::Unknown(code, items) => {
+                    f.write_fmt(format_args!(", unknown({code})={items:?}"))?
                 }
             }
         }
