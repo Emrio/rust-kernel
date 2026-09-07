@@ -5,6 +5,8 @@ use alloc::vec::Vec;
 
 use crate::net::arp::{ARP_PACKET, ARPOperation, ARPPacket, HardwareType, ProtocolType};
 use crate::net::device::NetworkDevice;
+use crate::net::dhcp::option::DHCPOption;
+use crate::net::dhcp::{self, DHCP_HEADER, DHCPPacket};
 use crate::net::error::BufferTooSmall;
 use crate::net::ethernet::address::EthernetAddress;
 use crate::net::ethernet::ethertype::EtherType;
@@ -103,6 +105,72 @@ pub fn generate_pong_udp_packet(
                 source: request_udp.destination(),
                 destination: request_udp.source(),
                 next: L7::Buffer(payload),
+            },
+        },
+    })
+}
+
+pub fn generate_dhcp_discover(ctx: &NetContext) -> Result<Vec<u8>, BufferTooSmall> {
+    build(L2::Ethernet {
+        source: ctx.hardware_address(),
+        destination: EthernetAddress::BROADCAST,
+        ethertype: EtherType::IPv4,
+        next: L3::IPv4 {
+            source: IPv4Address::default(),
+            destination: IPv4Address::BROADCAST,
+            protocol: Protocol::UDP,
+            next: L4::Udp {
+                source: dhcp::ports::CLIENT,
+                destination: dhcp::ports::SERVER,
+                next: L7::Dhcp {
+                    operation: dhcp::operation::Operation::BootRequest,
+                    xid: 0x4242, // TODO:
+                    hardware_address: ctx.hardware_address(),
+                    options: vec![
+                        DHCPOption::MessageType(dhcp::option::MessageType::Discover),
+                        DHCPOption::ParameterRequestList(vec![
+                            dhcp::option::ParameterRequest::SubnetMask,
+                            dhcp::option::ParameterRequest::Router,
+                            dhcp::option::ParameterRequest::DomainNameServer,
+                        ]),
+                        DHCPOption::End,
+                    ],
+                },
+            },
+        },
+    })
+}
+
+pub fn generate_dhcp_request(
+    ctx: &NetContext,
+    // request_frame: &EthernetFrame<&[u8]>,
+    // request_ipv4: &IPv4Packet<&[u8]>,
+    // request_udp: &UDPPacket<&[u8]>,
+    dhcp_offer: &DHCPPacket<&[u8]>,
+) -> Result<Vec<u8>, BufferTooSmall> {
+    let mut options = vec![DHCPOption::MessageType(dhcp::option::MessageType::Request)];
+    if let Some(id) = dhcp_offer.options().get_server_identifier() {
+        options.push(DHCPOption::ServerIdentifier(id));
+    }
+    options.push(DHCPOption::End);
+
+    build(L2::Ethernet {
+        source: ctx.hardware_address(),
+        destination: EthernetAddress::BROADCAST,
+        ethertype: EtherType::IPv4,
+        next: L3::IPv4 {
+            source: IPv4Address::default(),
+            destination: IPv4Address::BROADCAST,
+            protocol: Protocol::UDP,
+            next: L4::Udp {
+                source: dhcp::ports::CLIENT,
+                destination: dhcp::ports::SERVER,
+                next: L7::Dhcp {
+                    operation: dhcp::operation::Operation::BootRequest,
+                    xid: dhcp_offer.xid(),
+                    hardware_address: ctx.hardware_address(),
+                    options,
+                },
             },
         },
     })
@@ -212,12 +280,19 @@ impl<'a> L4Frame<'a> {
 
 enum L7 {
     Buffer(Vec<u8>),
+    Dhcp {
+        operation: dhcp::operation::Operation,
+        xid: u32,
+        hardware_address: EthernetAddress,
+        options: Vec<DHCPOption>,
+    },
 }
 
 impl L7 {
     fn size(&self) -> usize {
         match self {
             Self::Buffer(buffer) => buffer.len(),
+            Self::Dhcp { options, .. } => DHCP_HEADER + dhcp::option::options_to_vec(options).len(),
         }
     }
 }
@@ -308,6 +383,26 @@ fn build(l2: L2) -> Result<Vec<u8>, BufferTooSmall> {
 
     match l7 {
         L7::Buffer(buffer) => l4frame.payload_mut().copy_from_slice(&buffer),
+        L7::Dhcp {
+            operation,
+            xid,
+            hardware_address,
+            options,
+        } => {
+            let mut dhcp = DHCPPacket::new(l4frame.payload_mut())?;
+
+            dhcp.set_operation(operation)
+                .set_hardware_type(HardwareType::Ethernet)
+                .set_hardware_length(EthernetAddress::SIZE)
+                .set_xid(xid)
+                .set_hardware_address(hardware_address)
+                .set_magic_cookie();
+
+            let mut dhcp_options = dhcp.options_mut();
+            for option in options {
+                dhcp_options.append(option)?;
+            }
+        }
     }
 
     if let L4Frame::Icmp(mut icmppacket) = l4frame {

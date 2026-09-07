@@ -1,4 +1,6 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+use crate::net::error::BufferTooSmall;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct IPv4Address([u8; 4]);
 
 impl IPv4Address {
@@ -26,12 +28,28 @@ impl IPv4Address {
     pub fn is_broadcast(&self) -> bool {
         *self == IPv4Address::BROADCAST
     }
+
+    pub fn is_zero(&self) -> bool {
+        *self == IPv4Address::default()
+    }
 }
 
 impl core::fmt::Display for IPv4Address {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let [a, b, c, d] = self.0;
         f.write_fmt(format_args!("{a}.{b}.{c}.{d}"))
+    }
+}
+
+impl TryInto<IPv4Address> for &[u8] {
+    type Error = BufferTooSmall;
+
+    fn try_into(self) -> Result<IPv4Address, Self::Error> {
+        if self.len() == 4 {
+            Ok(IPv4Address::from_bytes(self))
+        } else {
+            Err(BufferTooSmall)
+        }
     }
 }
 

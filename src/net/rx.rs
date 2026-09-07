@@ -10,6 +10,7 @@ use futures_util::{Stream, StreamExt};
 use crate::drivers::i82540em::DEVICE;
 use crate::net::arp::{ARPOperation, ARPPacket};
 use crate::net::device::NetworkDevice;
+use crate::net::dhcp::DHCPPacket;
 use crate::net::error::BufferTooSmall;
 use crate::net::ethernet::address::EthernetAddress;
 use crate::net::ethernet::{EthernetFrame, ethertype::EtherType};
@@ -17,9 +18,10 @@ use crate::net::icmp::ICMPPacket;
 use crate::net::ipv4::IPv4Packet;
 use crate::net::ipv4::address::IPv4Address;
 use crate::net::ipv4::protocol::Protocol;
-use crate::net::tx::{generate_arp_reply, generate_echo_reply, generate_pong_udp_packet};
+use crate::net::tx::{self, generate_arp_reply, generate_echo_reply, generate_pong_udp_packet};
 use crate::net::udp::UDPPacket;
-use crate::net::{STATE_MACHINE, StateMachine};
+use crate::net::{Configuration, DHCPStateMachine, STATE_MACHINE, StateMachine, dhcp};
+use crate::time::Instant;
 
 pub(crate) static WAKER: AtomicWaker = AtomicWaker::new();
 
@@ -32,7 +34,7 @@ pub struct NetContext {
 impl NetContext {
     pub fn from_device_and_state(device: &impl NetworkDevice, state: &StateMachine) -> Self {
         Self {
-            ipv4_address: state.ipv4,
+            ipv4_address: state.configuration().map(|conf| conf.ipv4),
             hardware_address: device.hardware_address(),
         }
     }
@@ -62,7 +64,9 @@ impl NetContext {
 
 pub enum ProcessingResult {
     Nothing,
-    SetIpv4(IPv4Address),
+    DHCPReset,
+    DHCPOffered,
+    DHCPAccepted(Configuration),
     Respond(Vec<u8>),
 }
 
@@ -83,13 +87,13 @@ pub fn process_ethernet_frame(
 
             kprintln!("-> ARP packet: {}", arp);
 
-            if arp.operation() == ARPOperation::Reply
-                && ctx.ipv4_address().is_none()
-                && arp.target_hardware_address() == ctx.hardware_address()
-            {
-                kprintln!("-> My IPv4: {}", arp.target_protocol_address());
-                return Ok(ProcessingResult::SetIpv4(arp.target_protocol_address()));
-            }
+            // if arp.operation() == ARPOperation::Reply
+            //     && ctx.ipv4_address().is_none()
+            //     && arp.target_hardware_address() == ctx.hardware_address()
+            // {
+            //     kprintln!("-> My IPv4: {}", arp.target_protocol_address());
+            //     return Ok(ProcessingResult::SetIpv4(arp.target_protocol_address()));
+            // }
 
             if arp.operation() == ARPOperation::Request
                 && let Some(ipv4_address) = ctx.ipv4_address()
@@ -143,6 +147,45 @@ pub fn process_ethernet_frame(
                     let udp = UDPPacket::new(ipv4.payload())?;
                     kprintln!("-> UDP packet: {}", udp);
 
+                    if udp.source() == dhcp::ports::SERVER
+                        && udp.destination() == dhcp::ports::CLIENT
+                        && ctx.ipv4_address.is_none()
+                    {
+                        let dhcp = DHCPPacket::new(udp.payload())?;
+                        kprintln!("-> DHCP packet: {}", dhcp);
+
+                        let message_type = dhcp.options().get_message_type();
+
+                        return match message_type {
+                            Some(dhcp::option::MessageType::Offer) => Ok(
+                                ProcessingResult::Respond(tx::generate_dhcp_request(ctx, &dhcp)?),
+                            ),
+                            Some(dhcp::option::MessageType::Ack) => {
+                                let Some(invalid_at) = dhcp
+                                    .options()
+                                    .get_lease_time()
+                                    .map(|lease_time| Instant::now() + lease_time)
+                                else {
+                                    return Ok(ProcessingResult::DHCPReset);
+                                };
+
+                                if dhcp.your_address().is_broadcast()
+                                    || dhcp.your_address().is_zero()
+                                {
+                                    return Ok(ProcessingResult::DHCPReset);
+                                }
+
+                                Ok(ProcessingResult::DHCPAccepted(Configuration {
+                                    invalid_at,
+                                    ipv4: dhcp.your_address(),
+                                    router: dhcp.options().get_router(),
+                                    dns: dhcp.options().get_dns(),
+                                }))
+                            }
+                            _ => Ok(ProcessingResult::Nothing),
+                        };
+                    }
+
                     Ok(ProcessingResult::Respond(generate_pong_udp_packet(
                         ctx, frame, &ipv4, &udp,
                     )?))
@@ -169,7 +212,13 @@ pub fn handle_incoming_ethernet_packet(buffer: &[u8]) {
     let context = NetContext::from_device_and_state(device, &state);
     match process_ethernet_frame(&context, &frame) {
         Ok(ProcessingResult::Nothing) => {}
-        Ok(ProcessingResult::SetIpv4(ipv4_address)) => state.ipv4 = Some(ipv4_address),
+        Ok(ProcessingResult::DHCPReset) => {
+            state.dhcp = DHCPStateMachine::Unconfigured(Instant::now())
+        }
+        Ok(ProcessingResult::DHCPOffered) => state.dhcp = DHCPStateMachine::Offered(Instant::now()),
+        Ok(ProcessingResult::DHCPAccepted(configuration)) => {
+            state.dhcp = DHCPStateMachine::Assigned(configuration)
+        }
         Ok(ProcessingResult::Respond(buffer)) => device.send_packet(&buffer),
         Err(BufferTooSmall) => {
             kprintln!("-> Err: Could not decode packet: the packet is too small")
