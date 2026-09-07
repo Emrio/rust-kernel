@@ -8,8 +8,12 @@
 
 - [x] Working ethernet IO
 - [x] Answer to ICMP echo
-- [ ] DHCP autoconfiguration
-- [ ] HTTP file server
+- [x] UDP echo server
+- [x] DHCP autoconfiguration
+- [ ] ARP resolution
+- [ ] DNS resolution
+- [ ] TCP stack
+- [ ] HTTP server
 
 ### Side quests
 
