@@ -120,6 +120,10 @@ impl Instant {
     pub(crate) const fn zero() -> Self {
         Self(0)
     }
+
+    pub fn from_now(self) -> Duration {
+        Instant::now() - self
+    }
 }
 
 impl core::ops::Add<u64> for Instant {

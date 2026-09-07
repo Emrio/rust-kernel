@@ -20,7 +20,7 @@ use crate::net::ipv4::address::IPv4Address;
 use crate::net::ipv4::protocol::Protocol;
 use crate::net::tx::{self, generate_arp_reply, generate_echo_reply, generate_pong_udp_packet};
 use crate::net::udp::UDPPacket;
-use crate::net::{Configuration, DHCPStateMachine, STATE_MACHINE, StateMachine, dhcp};
+use crate::net::{DHCPConfiguration, DHCPStateMachine, STATE_MACHINE, StateMachine, dhcp};
 use crate::time::Instant;
 
 pub(crate) static WAKER: AtomicWaker = AtomicWaker::new();
@@ -66,7 +66,7 @@ pub enum ProcessingResult {
     Nothing,
     DHCPReset,
     DHCPOffered,
-    DHCPAccepted(Configuration),
+    DHCPAccepted(DHCPConfiguration),
     Respond(Vec<u8>),
 }
 
@@ -175,7 +175,7 @@ pub fn process_ethernet_frame(
                                     return Ok(ProcessingResult::DHCPReset);
                                 }
 
-                                Ok(ProcessingResult::DHCPAccepted(Configuration {
+                                Ok(ProcessingResult::DHCPAccepted(DHCPConfiguration {
                                     invalid_at,
                                     ipv4: dhcp.your_address(),
                                     router: dhcp.options().get_router(),

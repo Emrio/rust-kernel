@@ -1,7 +1,6 @@
 use core::time::Duration;
 
 use crate::drivers::i82540em::DEVICE;
-use crate::net::device::NetworkDevice;
 use crate::time::{Instant, sleep};
 use ipv4::address::IPv4Address;
 
@@ -22,7 +21,7 @@ mod tests;
 
 pub use rx::rx_loop;
 
-pub struct Configuration {
+pub struct DHCPConfiguration {
     invalid_at: Instant,
     ipv4: IPv4Address,
     router: Option<IPv4Address>,
@@ -32,7 +31,7 @@ pub struct Configuration {
 enum DHCPStateMachine {
     Unconfigured(Instant),
     Offered(Instant),
-    Assigned(Configuration),
+    Assigned(DHCPConfiguration),
 }
 
 pub struct StateMachine {
@@ -40,7 +39,7 @@ pub struct StateMachine {
 }
 
 impl StateMachine {
-    pub fn configuration(&self) -> Option<&Configuration> {
+    pub fn configuration(&self) -> Option<&DHCPConfiguration> {
         match &self.dhcp {
             DHCPStateMachine::Assigned(configuration) => Some(configuration),
             _ => None,
@@ -52,23 +51,53 @@ static STATE_MACHINE: spin::Mutex<StateMachine> = spin::Mutex::new(StateMachine 
     dhcp: DHCPStateMachine::Unconfigured(Instant::zero()),
 });
 
+async fn net_loop_logic() {
+    let Some(device) = DEVICE.get() else {
+        // network not ready
+        return;
+    };
+
+    let mut state_machine = STATE_MACHINE.lock();
+
+    if let DHCPStateMachine::Unconfigured(last_request) = state_machine.dhcp
+        && last_request.from_now() > Duration::from_secs(1)
+    {
+        // No DHCP configuration
+
+        state_machine.dhcp = DHCPStateMachine::Unconfigured(Instant::now());
+
+        let context = rx::NetContext::from_device_and_state(device, &state_machine);
+        tx::generate_dhcp_discover(&context).expect("buffer too small");
+
+        return;
+    }
+
+    if let DHCPStateMachine::Offered(offered_time) = state_machine.dhcp
+        && offered_time.from_now() > Duration::from_secs(5)
+    {
+        // DHCP offer was not met with ack, retrying...
+        state_machine.dhcp = DHCPStateMachine::Unconfigured(Instant::now());
+
+        return;
+    }
+
+    if let DHCPStateMachine::Assigned(DHCPConfiguration { invalid_at, .. }) = state_machine.dhcp
+        && invalid_at < Instant::now()
+    {
+        // DHCP lease expired
+
+        state_machine.dhcp = DHCPStateMachine::Unconfigured(Instant::now());
+
+        let context = rx::NetContext::from_device_and_state(device, &state_machine);
+        tx::generate_dhcp_discover(&context).expect("buffer too small");
+
+        return;
+    }
+}
+
 pub async fn net_loop() {
     loop {
-        let mut state_machine = STATE_MACHINE.lock();
-
-        if let Some(device) = DEVICE.get()
-            && let DHCPStateMachine::Unconfigured(last_request) = state_machine.dhcp
-            && Instant::now() - last_request > Duration::from_secs(1)
-        {
-            state_machine.dhcp = DHCPStateMachine::Unconfigured(Instant::now());
-            let context = rx::NetContext::from_device_and_state(device, &state_machine);
-            match tx::generate_dhcp_discover(&context) {
-                Ok(frame) => device.send_packet(&frame),
-                Err(error::BufferTooSmall) => unreachable!("Buffer too small"),
-            }
-        }
-        drop(state_machine);
-
+        net_loop_logic().await;
         sleep(Duration::from_secs(1)).await;
     }
 }
