@@ -3,6 +3,7 @@ use core::time::Duration;
 use crate::drivers::i82540em::DEVICE;
 use crate::net::device::NetworkDevice;
 use crate::net::ipv4::mask::IPv4Mask;
+use crate::net::tcp::protocol::ConnectionPool;
 use crate::time::{Instant, sleep};
 use ipv4::address::IPv4Address;
 
@@ -40,6 +41,7 @@ enum DHCPStateMachine {
 
 pub struct StateMachine {
     dhcp: DHCPStateMachine,
+    tcp: ConnectionPool,
 }
 
 impl StateMachine {
@@ -53,6 +55,7 @@ impl StateMachine {
 
 static STATE_MACHINE: spin::Mutex<StateMachine> = spin::Mutex::new(StateMachine {
     dhcp: DHCPStateMachine::Unconfigured(Instant::zero()),
+    tcp: ConnectionPool::new(),
 });
 
 async fn net_loop_logic() {

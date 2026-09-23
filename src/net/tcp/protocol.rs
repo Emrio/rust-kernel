@@ -10,6 +10,8 @@ use crate::net::ipv4::address::IPv4Address;
 use crate::net::tcp::sequence::Sequence;
 use crate::net::tcp::{TCP_HEADER, TCPPacket};
 
+const MY_WINDOW: usize = 4096;
+
 pub struct TransmissionControlBlock {
     local_address: IPv4Address,
     local_port: u16,
@@ -107,6 +109,7 @@ impl TransmissionControlBlock {
             .set_syn(true)
             .set_ack(true)
             .set_data_offset_and_reserved()
+            .set_window(MY_WINDOW as u16)
             .compute_checksum(self.local_address, self.remote_address);
 
         Ok(buffer)
@@ -124,12 +127,13 @@ impl TransmissionControlBlock {
             .set_syn(false)
             .set_ack(true)
             .set_data_offset_and_reserved()
+            .set_window(MY_WINDOW as u16)
             .compute_checksum(self.local_address, self.remote_address);
 
         Ok(buffer)
     }
 
-    pub fn accept(&mut self, packet: TCPPacket<&[u8]>) -> Result<Option<Vec<u8>>, BufferTooSmall> {
+    pub fn accept(&mut self, packet: &TCPPacket<&[u8]>) -> Result<Option<Vec<u8>>, BufferTooSmall> {
         if packet.rst() {
             self.state = State::Closed;
             return Ok(None);
@@ -162,30 +166,23 @@ impl TransmissionControlBlock {
             return Ok(None);
         }
 
-        if packet.fin() {
-            self.state = State::CloseWait;
-
-            if packet.payload().is_empty() {
-                self.rcv_nxt += 1;
-                return self.generate_ack().map(Some);
-            }
-        }
-
         if !packet.payload().is_empty() {
             if packet.sequence() == self.rcv_nxt {
                 self.rcv_buf.extend_from_slice(packet.payload());
                 self.rcv_nxt += packet.payload().len() as u32;
-                return self.generate_ack().map(Some);
             } else if packet.sequence() < self.rcv_nxt {
                 // already acked
-                return self.generate_ack().map(Some);
             } else {
                 // too early
-                return Ok(None);
             }
         }
 
-        Ok(None)
+        if packet.fin() && packet.sequence() + packet.payload().len() as u32 == self.rcv_nxt {
+            self.state = State::CloseWait;
+            self.rcv_nxt += 1;
+        }
+
+        self.generate_ack().map(Some)
     }
 }
 
@@ -203,6 +200,13 @@ pub struct ConnectionPool {
 }
 
 impl ConnectionPool {
+    pub const fn new() -> Self {
+        Self {
+            active_connections: BTreeMap::new(),
+            listening: BTreeSet::new(),
+        }
+    }
+
     fn get_connection(
         &mut self,
         ip: &IPv4Packet<&[u8]>,
@@ -221,8 +225,8 @@ impl ConnectionPool {
         self.active_connections.get_mut(&id)
     }
 
-    pub fn accept(&mut self, ip: IPv4Packet<&[u8]>, tcp: TCPPacket<&[u8]>) -> Option<Vec<u8>> {
-        let connection = self.get_connection(&ip, &tcp)?;
+    pub fn accept(&mut self, ip: &IPv4Packet<&[u8]>, tcp: &TCPPacket<&[u8]>) -> Option<Vec<u8>> {
+        let connection = self.get_connection(ip, tcp)?;
 
         let result = connection
             .accept(tcp)

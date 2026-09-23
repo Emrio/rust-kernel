@@ -181,6 +181,26 @@ pub fn generate_dhcp_request(
     })
 }
 
+pub fn generate_ipv4(
+    ctx: &NetContext,
+    request_frame: &EthernetFrame<&[u8]>,
+    request_ipv4: &IPv4Packet<&[u8]>,
+    protocol: Protocol,
+    payload: Vec<u8>,
+) -> Result<Vec<u8>, BufferTooSmall> {
+    build(L2::Ethernet {
+        source: ctx.hardware_address(),
+        destination: request_frame.source(),
+        ethertype: EtherType::IPv4,
+        next: L3::IPv4 {
+            source: ctx.ipv4_address().unwrap_or(request_ipv4.destination()),
+            destination: request_ipv4.source(),
+            protocol,
+            next: L4::Buffer(payload),
+        },
+    })
+}
+
 enum L2 {
     Ethernet {
         source: EthernetAddress,
@@ -248,6 +268,7 @@ impl<'a> L3Frame<'a> {
 }
 
 enum L4 {
+    Buffer(Vec<u8>),
     Udp {
         source: u16,
         destination: u16,
@@ -263,6 +284,7 @@ enum L4 {
 impl L4 {
     fn size(&self) -> usize {
         match self {
+            Self::Buffer(buffer) => buffer.len(),
             Self::Udp { next, .. } => UDP_HEADER + next.size(),
             Self::IcmpEcho { next, .. } => ICMP_PACKET + next.size(),
         }
@@ -363,6 +385,10 @@ fn build(l2: L2) -> Result<Vec<u8>, BufferTooSmall> {
 
     let l4size = l4.size();
     let (mut l4frame, l7) = match l4 {
+        L4::Buffer(buffer) => {
+            l3frame.payload_mut().copy_from_slice(&buffer);
+            return Ok(packet);
+        }
         L4::Udp {
             source,
             destination,

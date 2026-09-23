@@ -19,6 +19,7 @@ use crate::net::ipv4::IPv4Packet;
 use crate::net::ipv4::address::IPv4Address;
 use crate::net::ipv4::protocol::Protocol;
 use crate::net::tcp::TCPPacket;
+use crate::net::tcp::protocol::ConnectionPool;
 use crate::net::tx::{self, generate_arp_reply, generate_echo_reply, generate_pong_udp_packet};
 use crate::net::udp::UDPPacket;
 use crate::net::{DHCPConfiguration, DHCPStateMachine, STATE_MACHINE, StateMachine, dhcp};
@@ -74,6 +75,7 @@ pub enum ProcessingResult {
 
 pub fn process_ethernet_frame(
     ctx: &NetContext,
+    tcp_pool: &mut ConnectionPool,
     frame: &EthernetFrame<&[u8]>,
 ) -> Result<ProcessingResult, BufferTooSmall> {
     klog!("net_rx", "Ethernet frame: ", frame);
@@ -150,7 +152,17 @@ pub fn process_ethernet_frame(
                     let tcp = TCPPacket::new(ipv4.payload())?;
                     klog!("net_rx", "TCP packet: ", tcp);
 
-                    Ok(ProcessingResult::Nothing)
+                    if let Some(response) = tcp_pool.accept(&ipv4, &tcp) {
+                        Ok(ProcessingResult::Respond(tx::generate_ipv4(
+                            ctx,
+                            frame,
+                            &ipv4,
+                            Protocol::TCP,
+                            response,
+                        )?))
+                    } else {
+                        Ok(ProcessingResult::Nothing)
+                    }
                 }
 
                 Protocol::UDP => {
@@ -224,7 +236,7 @@ pub fn handle_incoming_ethernet_packet(buffer: &[u8]) {
     let mut state = STATE_MACHINE.lock();
     let device = DEVICE.get().expect("device to be ready");
     let context = NetContext::from_device_and_state(device, &state);
-    match process_ethernet_frame(&context, &frame) {
+    match process_ethernet_frame(&context, &mut state.tcp, &frame) {
         Ok(ProcessingResult::Nothing) => {}
         Ok(ProcessingResult::DHCPReset) => {
             state.dhcp = DHCPStateMachine::Unconfigured(Instant::now())

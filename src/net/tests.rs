@@ -8,6 +8,7 @@ use crate::net::ipv4::address::IPv4Address;
 use crate::net::ipv4::protocol::Protocol;
 use crate::net::ipv4::{IPV4_PACKET, IPv4Packet};
 use crate::net::rx::{NetContext, ProcessingResult, process_ethernet_frame};
+use crate::net::tcp::protocol::ConnectionPool;
 
 #[test_case]
 fn icmp_echo_request_is_met_with_reply() {
@@ -34,6 +35,7 @@ fn icmp_echo_request_is_met_with_reply() {
 
     let Ok(ProcessingResult::Respond(response)) = process_ethernet_frame(
         &NetContext::from_hardware_address(my_hardware_address),
+        &mut ConnectionPool::default(),
         &frame,
     ) else {
         panic!("Expected response")
@@ -85,7 +87,9 @@ fn arp_request_for_me_is_met_with_reply() {
     let frame = EthernetFrame::new(packet.as_slice()).unwrap();
 
     let ctx = NetContext::from_addresses(target_hw, target_ip);
-    let Ok(ProcessingResult::Respond(response)) = process_ethernet_frame(&ctx, &frame) else {
+    let Ok(ProcessingResult::Respond(response)) =
+        process_ethernet_frame(&ctx, &mut ConnectionPool::default(), &frame)
+    else {
         panic!("Expected response")
     };
 
