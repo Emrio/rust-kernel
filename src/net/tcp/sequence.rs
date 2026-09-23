@@ -56,3 +56,49 @@ impl core::fmt::Display for Sequence {
         self.0.fmt(f)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test_case]
+    fn ordering_is_trivial_when_not_wrapping() {
+        assert!(Sequence::from(100) < Sequence::from(200));
+        assert!(Sequence::from(200) > Sequence::from(100));
+        assert_eq!(Sequence::from(100), Sequence::from(100));
+    }
+
+    #[test_case]
+    fn ordering_respects_wraparound() {
+        // u32::MAX comes right before 0 on the circular sequence space,
+        // even though as plain integers MAX > 0.
+        let just_before_wrap = Sequence::from(u32::MAX);
+        let just_after_wrap = Sequence::from(0);
+
+        assert!(just_before_wrap < just_after_wrap);
+        assert!(just_after_wrap > just_before_wrap);
+    }
+
+    #[test_case]
+    fn ordering_still_works_a_bit_further_past_the_wrap() {
+        let before = Sequence::from(u32::MAX - 10);
+        let after = Sequence::from(5);
+
+        assert!(before < after);
+        assert!(after > before);
+    }
+
+    #[test_case]
+    fn add_wraps_around() {
+        let seq = Sequence::from(u32::MAX);
+        assert_eq!(seq + 1, Sequence::from(0));
+        assert_eq!(seq + 11, Sequence::from(10));
+    }
+
+    #[test_case]
+    fn add_assign_wraps_around() {
+        let mut seq = Sequence::from(u32::MAX - 2);
+        seq += 5;
+        assert_eq!(seq, Sequence::from(2));
+    }
+}
