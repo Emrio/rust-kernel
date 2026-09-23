@@ -116,8 +116,25 @@ impl TransmissionControlBlock {
             .set_destination(self.remote_port)
             .set_sequence(self.snd_nxt)
             .set_acknowledgment(self.rcv_nxt)
-            .set_syn(false)
             .set_ack(true)
+            .set_data_offset_and_reserved()
+            .set_window(MY_WINDOW as u16)
+            .compute_checksum(self.local_address, self.remote_address);
+
+        Ok(buffer)
+    }
+
+    fn generate_fin(&self) -> Result<Vec<u8>, BufferTooSmall> {
+        let mut buffer = vec![0; TCP_HEADER];
+        let mut packet = TCPPacket::new(&mut buffer)?;
+
+        packet
+            .set_source(self.local_port)
+            .set_destination(self.remote_port)
+            .set_sequence(self.snd_nxt)
+            .set_acknowledgment(self.rcv_nxt)
+            .set_ack(true)
+            .set_fin(true)
             .set_data_offset_and_reserved()
             .set_window(MY_WINDOW as u16)
             .compute_checksum(self.local_address, self.remote_address);
@@ -219,9 +236,20 @@ impl TransmissionControlBlock {
             );
             self.state = State::CloseWait;
             self.rcv_nxt += 1;
+            // TEMPORARY:
+            return self.close();
         }
 
         self.generate_ack().map(Some)
+    }
+
+    pub fn close(&mut self) -> Result<Option<Vec<u8>>, BufferTooSmall> {
+        let response = self.generate_fin()?;
+
+        self.snd_nxt += 1;
+        self.state = State::LastAck;
+
+        Ok(Some(response))
     }
 }
 
