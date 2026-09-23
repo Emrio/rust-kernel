@@ -296,7 +296,7 @@ impl ConnectionPool {
             ip.source(),
             tcp.source(),
         );
-        if !self.active_connections.contains_key(&id) {
+        if !self.active_connections.contains_key(&id) && tcp.syn() {
             let specific_listen = Listen::SpecificAddress(ip.destination(), tcp.destination());
             let any_listen = Listen::AnyAddress(tcp.destination());
             if !self.listening.contains(&specific_listen) && !self.listening.contains(&any_listen) {
@@ -310,7 +310,20 @@ impl ConnectionPool {
     }
 
     pub fn accept(&mut self, ip: &IPv4Packet<&[u8]>, tcp: &TCPPacket<&[u8]>) -> Option<Vec<u8>> {
-        let connection = self.get_connection(ip, tcp)?;
+        let Some(connection) = self.get_connection(ip, tcp) else {
+            klog!(
+                format_args!(
+                    "tcp/{}/{}/{}/{}",
+                    ip.destination(),
+                    tcp.destination(),
+                    ip.source(),
+                    tcp.source()
+                ),
+                "Sending ",
+                "RST".red()
+            );
+            return generate_rst(ip, tcp);
+        };
 
         let result = connection
             .accept(tcp)
@@ -323,6 +336,34 @@ impl ConnectionPool {
 
         result
     }
+}
+
+fn generate_rst(ip: &IPv4Packet<&[u8]>, tcp: &TCPPacket<&[u8]>) -> Option<Vec<u8>> {
+    if tcp.rst() {
+        return None;
+    }
+
+    let mut buffer = vec![0; TCP_HEADER];
+    let mut packet = TCPPacket::new(&mut buffer).expect("buffer is not too small");
+
+    packet
+        .set_source(tcp.destination())
+        .set_destination(tcp.source())
+        .set_rst(true)
+        .set_data_offset_and_reserved();
+
+    if tcp.ack() {
+        packet.set_sequence(tcp.acknowledgment());
+    } else {
+        packet
+            .set_sequence(0.into())
+            .set_acknowledgment(tcp.sequence() + tcp.payload().len() as u32)
+            .set_ack(true);
+    }
+
+    packet.compute_checksum(ip.destination(), ip.source());
+
+    Some(buffer)
 }
 
 #[cfg(test)]
@@ -491,7 +532,10 @@ mod tests {
             .expect("a duplicate segment should still be met with a duplicate ACK");
         let response = TCPPacket::new(response.as_slice()).unwrap();
 
-        assert_eq!(tcb.rcv_buf, buf_after_first, "data must not be appended twice");
+        assert_eq!(
+            tcb.rcv_buf, buf_after_first,
+            "data must not be appended twice"
+        );
         assert_eq!(tcb.rcv_nxt, rcv_nxt_after_first);
         assert_eq!(response.acknowledgment(), tcb.rcv_nxt);
     }
@@ -503,7 +547,15 @@ mod tests {
 
         // Arrives 100 bytes ahead of what we expect.
         let far_seq: u32 = Into::<u32>::into(rcv_nxt_before) + 100;
-        let data = segment(far_seq, tcb.snd_nxt.into(), false, true, false, false, b"late");
+        let data = segment(
+            far_seq,
+            tcb.snd_nxt.into(),
+            false,
+            true,
+            false,
+            false,
+            b"late",
+        );
 
         tcb.accept(&TCPPacket::new(data.as_slice()).unwrap())
             .unwrap();
@@ -635,5 +687,117 @@ mod tests {
             .unwrap();
 
         assert_eq!(tcb.state, State::Closed);
+    }
+
+    /// Wraps a raw TCP segment (as produced by `segment`) in an IPv4 header,
+    /// so it can go through `ConnectionPool::accept`, which needs the IPv4
+    /// addresses (not just the TCP ports).
+    fn ip_frame(tcp_bytes: &[u8]) -> Vec<u8> {
+        use crate::net::ipv4::IPV4_PACKET;
+        use crate::net::ipv4::protocol::Protocol;
+        use crate::net::ipv4::ttl::TimeToLive;
+
+        let mut buffer = vec![0u8; IPV4_PACKET + tcp_bytes.len()];
+        {
+            let mut ip = IPv4Packet::new(buffer.as_mut_slice()).unwrap();
+            ip.set_version_and_length()
+                .set_packet_length(IPV4_PACKET + tcp_bytes.len())
+                .set_protocol(Protocol::TCP)
+                .set_destination(local())
+                .set_source(remote())
+                .set_ttl(TimeToLive::max())
+                .compute_checksum();
+            ip.payload_mut().copy_from_slice(tcp_bytes);
+        }
+        buffer
+    }
+
+    #[test_case]
+    fn stray_non_syn_segment_does_not_create_a_zombie_connection() {
+        let mut pool = ConnectionPool::default();
+        pool.listen(Listen::AnyAddress(LOCAL_PORT));
+
+        // A stray ACK for a connection we never saw a SYN for (e.g. a late
+        // retransmission from a connection that predates us listening).
+        let tcp_bytes = segment(1000, 5000, false, true, false, false, &[]);
+        let ip_bytes = ip_frame(&tcp_bytes);
+        let ip = IPv4Packet::new(ip_bytes.as_slice()).unwrap();
+        let tcp = TCPPacket::new(ip.payload()).unwrap();
+
+        pool.accept(&ip, &tcp);
+
+        assert!(
+            pool.active_connections.is_empty(),
+            "a non-SYN segment for an unknown connection must not spawn a zombie TCB"
+        );
+    }
+
+    #[test_case]
+    fn rst_reply_to_ack_segment_uses_incoming_ack_as_sequence() {
+        let mut pool = ConnectionPool::default();
+        pool.listen(Listen::AnyAddress(LOCAL_PORT));
+
+        // Exactly like the stray retransmitted ACK+PSH+FIN observed in the wild:
+        // no SYN was ever seen for this connection.
+        let tcp_bytes = segment(1000, 5000, false, true, true, false, b"stray!!");
+        let ip_bytes = ip_frame(&tcp_bytes);
+        let ip = IPv4Packet::new(ip_bytes.as_slice()).unwrap();
+        let tcp = TCPPacket::new(ip.payload()).unwrap();
+
+        let response = pool.accept(&ip, &tcp).expect("expected a RST");
+        let response = TCPPacket::new(response.as_slice()).unwrap();
+
+        assert!(response.rst());
+        assert_eq!(
+            response.sequence(),
+            Sequence::from(5000),
+            "RFC 793: when the offending segment has ACK set, the RST's sequence \
+             number must equal that ACK value, or real stacks treat the RST as \
+             out-of-window and silently ignore it"
+        );
+    }
+
+    #[test_case]
+    fn rst_reply_to_segment_without_ack_computes_sequence_and_ack() {
+        let mut pool = ConnectionPool::default();
+        pool.listen(Listen::AnyAddress(LOCAL_PORT));
+
+        // A bare FIN with no ACK and no matching connection: unusual, but
+        // covered by RFC 793's reset-generation rules.
+        let payload: &[u8] = b"abc";
+        let tcp_bytes = segment(2000, 0, false, false, true, false, payload);
+        let ip_bytes = ip_frame(&tcp_bytes);
+        let ip = IPv4Packet::new(ip_bytes.as_slice()).unwrap();
+        let tcp = TCPPacket::new(ip.payload()).unwrap();
+
+        let response = pool.accept(&ip, &tcp).expect("expected a RST");
+        let response = TCPPacket::new(response.as_slice()).unwrap();
+
+        assert!(response.rst());
+        assert!(response.ack());
+        assert_eq!(response.sequence(), Sequence::from(0));
+        assert_eq!(
+            response.acknowledgment(),
+            Sequence::from(2000 + payload.len() as u32)
+        );
+    }
+
+    #[test_case]
+    fn no_rst_sent_in_reply_to_an_incoming_rst() {
+        let mut pool = ConnectionPool::default();
+        pool.listen(Listen::AnyAddress(LOCAL_PORT));
+
+        let tcp_bytes = segment(3000, 0, false, false, false, true, &[]);
+        let ip_bytes = ip_frame(&tcp_bytes);
+        let ip = IPv4Packet::new(ip_bytes.as_slice()).unwrap();
+        let tcp = TCPPacket::new(ip.payload()).unwrap();
+
+        let response = pool.accept(&ip, &tcp);
+
+        assert!(
+            response.is_none(),
+            "replying to an unmatched RST with another RST risks a reset storm \
+             between two confused peers"
+        );
     }
 }
