@@ -122,6 +122,7 @@ pub fn process_ethernet_frame(
 
             if let Some(ipv4_address) = ctx.ipv4_address()
                 && ipv4_address != ipv4.destination()
+                && ipv4.destination() != IPv4Address::BROADCAST
             {
                 klog!("net_rx", "IP packet is not for me");
                 return Ok(ProcessingResult::Nothing);
