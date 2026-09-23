@@ -31,3 +31,18 @@
 - [Writing an operating system — sphaerophoria](https://www.youtube.com/watch?v=gBykJMqDqH0&list=PL980gcR1LE3LBuWuSv2CL28HsfnpC4Qf7)
 - [Rust OS — Uncle Scientist](https://www.youtube.com/watch?v=rH5jnbJ3tL4&list=PLib6-zlkjfXkdCjQgrZhmfJOWBk_C2FTY)
 - [e1000-driver — elliott10](https://github.com/elliott10/e1000-driver)
+
+## General network color convention
+
+L2 target/destination -> bright yellow
+L2 general -> yellow
+
+L3 target/destination -> bright green
+L3 general -> green
+
+L4 target/destination -> bright blue
+L4 general -> blue
+
+L7 -> bright magenta + magenta + bright cyan + cyan
+
+Erreur -> red
