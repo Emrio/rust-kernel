@@ -189,6 +189,9 @@ impl<T: AsRef<[u8]>> core::fmt::Display for DHCPPacket<T> {
                 option::DHCPOption::Hostname(hostname) => {
                     f.write_fmt(format_args!(", hostname={}", hostname.bright_cyan()))?
                 }
+                option::DHCPOption::DomainName(domain) => {
+                    f.write_fmt(format_args!(", domain={}", domain.cyan()))?
+                }
                 option::DHCPOption::ParameterRequestList(parameter_requests) => {
                     f.write_fmt(format_args!(", request_params={parameter_requests:?}"))?
                 }

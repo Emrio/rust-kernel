@@ -4,7 +4,7 @@ use crate::net::error::BufferTooSmall;
 pub struct IPv4Address([u8; 4]);
 
 impl IPv4Address {
-    pub const BROADCAST: IPv4Address = IPv4Address([0xff; 4]);
+    pub const BROADCAST: IPv4Address = IPv4Address([0xff; _]);
     pub const SIZE: usize = core::mem::size_of::<IPv4Address>();
 
     pub fn new(a: u8, b: u8, c: u8, d: u8) -> Self {
@@ -12,7 +12,7 @@ impl IPv4Address {
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Self {
-        let mut address = [0; 4];
+        let mut address = [0; _];
         address.copy_from_slice(bytes);
         Self(address)
     }

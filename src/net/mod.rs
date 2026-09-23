@@ -65,7 +65,7 @@ async fn net_loop_logic() {
 
     match state_machine.dhcp {
         DHCPStateMachine::Unconfigured(last_request)
-            if last_request.from_now() > Duration::from_secs(5) =>
+            if last_request.from_now() > Duration::from_secs(1) =>
         {
             // No DHCP configuration
             state_machine.dhcp = DHCPStateMachine::Unconfigured(Instant::now());
@@ -77,7 +77,7 @@ async fn net_loop_logic() {
         }
 
         DHCPStateMachine::Offered(offered_time)
-            if offered_time.from_now() > Duration::from_secs(10) =>
+            if offered_time.from_now() > Duration::from_secs(3) =>
         {
             // DHCP offer was not met with ack, retrying...
             state_machine.dhcp = DHCPStateMachine::Unconfigured(Instant::now());

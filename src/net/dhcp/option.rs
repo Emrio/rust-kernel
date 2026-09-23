@@ -123,6 +123,7 @@ pub enum DHCPOption {
     Router(IPv4Address),
     Dns(IPv4Address),
     Hostname(String),
+    DomainName(String),
     ParameterRequestList(Vec<ParameterRequest>),
     RequestedAddress(IPv4Address),
     LeaseTime(Duration),
@@ -152,6 +153,9 @@ impl DHCPOption {
                     .map_err(|_| DHCPOptionError::InvalidSize)?,
             )),
             12 => Ok(DHCPOption::Hostname(
+                String::from_utf8_lossy(content).to_string(),
+            )),
+            15 => Ok(DHCPOption::DomainName(
                 String::from_utf8_lossy(content).to_string(),
             )),
             51 => content
