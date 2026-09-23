@@ -14,7 +14,7 @@ use rust_kernel::memory::init_memory;
 use rust_kernel::net;
 use rust_kernel::time::init_time;
 use rust_kernel::{hlt_loop, init};
-use rust_kernel::{keyboard, klog};
+use rust_kernel::{keyboard, klog, serial};
 
 entry_point!(kmain);
 
@@ -32,7 +32,8 @@ fn kmain(boot_info: &'static BootInfo) -> ! {
     block_on(join!(
         net::rx_loop(),
         net::net_loop(),
-        keyboard::print_keypresses()
+        keyboard::print_keypresses(),
+        serial::print_keypresses()
     ));
 
     hlt_loop()

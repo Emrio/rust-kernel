@@ -28,6 +28,10 @@ pub fn init() {
     gdt::init();
     interrupts::init_idt();
     unsafe { interrupts::PICS.lock().initialize() };
+    unsafe {
+        let masks = interrupts::PICS.lock().read_masks();
+        interrupts::PICS.lock().write_masks(masks[0] & !(1 << 4), masks[1]);
+    }
     x86_64::instructions::interrupts::enable();
 }
 

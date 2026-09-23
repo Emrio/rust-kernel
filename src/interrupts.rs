@@ -25,6 +25,7 @@ impl InterruptIndex {
 
     const TIMER: Self = Self::new(0);
     const KEYBOARD: Self = Self::new(1);
+    const SERIAL: Self = Self::new(4);
     const ETHERNET_RX: Self = Self::new(11);
 }
 
@@ -42,6 +43,7 @@ lazy_static! {
         }
         idt[InterruptIndex::TIMER.into_index()].set_handler_fn(timer_interrupt_handler);
         idt[InterruptIndex::KEYBOARD.into_index()].set_handler_fn(keyboard_interrupt_handler);
+        idt[InterruptIndex::SERIAL.into_index()].set_handler_fn(serial_interrupt_handler);
         idt[InterruptIndex::ETHERNET_RX.into_index()].set_handler_fn(handle_ethernet_frame);
         idt
     };
@@ -84,6 +86,16 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
         PICS.lock()
             .notify_end_of_interrupt(InterruptIndex::KEYBOARD.into_index());
     }
+}
+
+extern "x86-interrupt" fn serial_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    if let Some(byte) = crate::serial::SERIAL1.lock().try_receive_byte() {
+        crate::serial::add_serial_byte(byte);
+    }
+    unsafe {
+        PICS.lock()
+            .notify_end_of_interrupt(InterruptIndex::SERIAL.into_index())
+    };
 }
 
 extern "x86-interrupt" fn handle_ethernet_frame(_stack_frame: InterruptStackFrame) {
