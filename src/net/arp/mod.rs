@@ -7,6 +7,7 @@ pub use operation::Operation as ARPOperation;
 pub use protocol_type::ProtocolType;
 
 use crate::net::ipv4::address::IPv4Address;
+use crate::print::colors::Colorable;
 
 use super::error::BufferTooSmall;
 use super::ethernet::address::EthernetAddress;
@@ -140,15 +141,15 @@ impl<T: AsRef<[u8]>> core::fmt::Display for ARPPacket<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!(
             "ARP(htype={}, hlen={}, prototype={}, protolen={}, operation={}, sender=({}, {}), target=({}, {}))",
-            self.hardware_type(),
-            self.hardware_length(),
-            self.protocol_type(),
-            self.protocol_length(),
-            self.operation(),
-            self.sender_hardware_address(),
-            self.sender_protocol_address(),
-            self.target_hardware_address(),
-            self.target_protocol_address()
+            self.hardware_type().yellow(),
+            self.hardware_length().yellow(),
+            self.protocol_type().green(),
+            self.protocol_length().green(),
+            self.operation().blue(),
+            self.sender_hardware_address().yellow(),
+            self.sender_protocol_address().green(),
+            self.target_hardware_address().bright_yellow(),
+            self.target_protocol_address().bright_green()
         ))
     }
 }

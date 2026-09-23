@@ -4,6 +4,7 @@ use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::fmt::Display;
 use core::time::Duration;
 
 use crate::net::error::BufferTooSmall;
@@ -23,6 +24,22 @@ pub enum MessageType {
     Release = 7,
     Inform = 8,
     Unknown(u8),
+}
+
+impl Display for MessageType {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            MessageType::Discover => f.write_str("Discover"),
+            MessageType::Offer => f.write_str("Offer"),
+            MessageType::Request => f.write_str("Request"),
+            MessageType::Decline => f.write_str("Decline"),
+            MessageType::Ack => f.write_str("Ack"),
+            MessageType::Nak => f.write_str("Nak"),
+            MessageType::Release => f.write_str("Release"),
+            MessageType::Inform => f.write_str("Inform"),
+            MessageType::Unknown(code) => f.write_fmt(format_args!("Unknown({code})")),
+        }
+    }
 }
 
 impl From<u8> for MessageType {

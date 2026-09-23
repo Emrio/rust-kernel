@@ -20,6 +20,7 @@ use crate::{
     memory::{MEMORY_MAPPER, MemoryMapper},
     mmio::MmioPtr,
     net::{device::NetworkDevice, ethernet::address::EthernetAddress},
+    print::colors::Colorable,
 };
 
 pub(crate) struct Status(u32);
@@ -123,6 +124,8 @@ impl Device {
 
 impl NetworkDevice for Device {
     fn send_packet(&self, buffer: &[u8]) {
+        kprintln!("[{}] {:02x?}", "send_packet".gray(), buffer);
+
         let mapper = MEMORY_MAPPER
             .get()
             .expect("memory mapper to be initialized");

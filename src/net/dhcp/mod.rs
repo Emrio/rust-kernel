@@ -9,6 +9,7 @@ use crate::net::dhcp::option::Options;
 use crate::net::error::BufferTooSmall;
 use crate::net::ethernet::address::{ADDRESS_SIZE, EthernetAddress};
 use crate::net::ipv4::address::IPv4Address;
+use crate::print::colors::Colorable;
 
 mod field {
     pub const OPERATION: usize = 0;
@@ -162,42 +163,48 @@ impl<T: AsRef<[u8]>> core::fmt::Display for DHCPPacket<T> {
         };
 
         f.write_fmt(format_args!(
-            "DHCP({message_type:?}, xid=0x{:02x}",
+            "DHCP({}, xid=0x{:02x}",
+            message_type.blue(),
             self.xid()
         ))?;
 
         if !self.your_address().is_zero() {
-            f.write_fmt(format_args!(", yaddr={}", self.your_address()))?;
+            f.write_fmt(format_args!(
+                ", yaddr={}",
+                self.your_address().bright_green()
+            ))?;
         }
 
         for option in self.options() {
             match option {
-                option::DHCPOption::Mask(mask) => f.write_fmt(format_args!(", mask={mask}"))?,
+                option::DHCPOption::Mask(mask) => {
+                    f.write_fmt(format_args!(", mask={}", mask.green()))?
+                }
                 option::DHCPOption::Router(ipv4_address) => {
-                    f.write_fmt(format_args!(", router={ipv4_address}"))?
+                    f.write_fmt(format_args!(", router={}", ipv4_address.green()))?
                 }
                 option::DHCPOption::Dns(ipv4_address) => {
-                    f.write_fmt(format_args!(", dns={ipv4_address}"))?
+                    f.write_fmt(format_args!(", dns={}", ipv4_address.green()))?
                 }
                 option::DHCPOption::Hostname(hostname) => {
-                    f.write_fmt(format_args!(", hostname={hostname}"))?
+                    f.write_fmt(format_args!(", hostname={}", hostname.bright_cyan()))?
                 }
                 option::DHCPOption::ParameterRequestList(parameter_requests) => {
                     f.write_fmt(format_args!(", request_params={parameter_requests:?}"))?
                 }
                 option::DHCPOption::RequestedAddress(address) => {
-                    f.write_fmt(format_args!(", request_address={address}"))?
+                    f.write_fmt(format_args!(", request_address={}", address.bright_green()))?
                 }
                 option::DHCPOption::LeaseTime(duration) => {
                     f.write_fmt(format_args!(", lease_time={duration:?}"))?
                 }
                 option::DHCPOption::MessageType(_) => {}
                 option::DHCPOption::ServerIdentifier(ipv4_address) => {
-                    f.write_fmt(format_args!(", sid={ipv4_address}"))?
+                    f.write_fmt(format_args!(", sid={}", ipv4_address.green()))?
                 }
                 option::DHCPOption::End => {}
                 option::DHCPOption::Unknown(code, items) => {
-                    f.write_fmt(format_args!(", unknown({code})={items:?}"))?
+                    f.write_fmt(format_args!(", unknown({})={items:?}", code.red()))?
                 }
             }
         }

@@ -1,6 +1,8 @@
+pub mod protocol;
+
 use core::ops::Not;
 
-use crate::net::error::BufferTooSmall;
+use crate::{net::error::BufferTooSmall, print::colors::Colorable};
 
 mod field {
     pub const SOURCE: core::ops::Range<usize> = 0..2;
@@ -240,10 +242,10 @@ impl<T: AsRef<[u8]>> core::fmt::Display for TCPPacket<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!(
             "TCP(source={}, destination={}, seq={}, ack={}, flags=",
-            self.source(),
-            self.destination(),
-            self.sequence(),
-            self.acknowledgment(),
+            self.source().blue(),
+            self.destination().bright_blue(),
+            self.sequence().magenta(),
+            self.acknowledgment().bright_magenta(),
         ))?;
 
         if self.cwr() {
@@ -256,19 +258,19 @@ impl<T: AsRef<[u8]>> core::fmt::Display for TCPPacket<T> {
             f.write_str("U")?;
         }
         if self.ack() {
-            f.write_str("A")?;
+            "A".bright_magenta().fmt(f)?;
         }
         if self.psh() {
-            f.write_str("P")?;
+            "P".magenta().fmt(f)?;
         }
         if self.rst() {
-            f.write_str("R")?;
+            "R".red().fmt(f)?;
         }
         if self.syn() {
-            f.write_str("S")?;
+            "S".green().fmt(f)?;
         }
         if self.fin() {
-            f.write_str("F")?;
+            "F".bright_red().fmt(f)?;
         }
 
         f.write_fmt(format_args!(", payload={} bytes)", self.payload().len()))

@@ -1,6 +1,7 @@
 pub mod icmp_type;
 
 use crate::net::{checksum::checksum, error::BufferTooSmall, icmp::icmp_type::IcmpType};
+use crate::print::colors::Colorable;
 
 pub struct ICMPPacket<T: AsRef<[u8]>> {
     buffer: T,
@@ -132,15 +133,15 @@ impl<T: AsRef<[u8]>> core::fmt::Display for ICMPPacket<T> {
         if self.is_echo_reply() || self.is_echo_request() {
             f.write_fmt(format_args!(
                 "ICMP({}, id={}, seq={})",
-                self.icmp_type(),
-                self.echo_identifier(),
-                self.echo_sequence(),
+                self.icmp_type().blue(),
+                self.echo_identifier().magenta(),
+                self.echo_sequence().bright_magenta(),
             ))
         } else {
             f.write_fmt(format_args!(
                 "ICMP(type={}, code={})",
-                self.icmp_type(),
-                self.code(),
+                self.icmp_type().blue(),
+                self.code().blue(),
             ))
         }
     }

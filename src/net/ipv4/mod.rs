@@ -6,6 +6,7 @@ pub mod ttl;
 use crate::net::checksum::checksum;
 use crate::net::error::BufferTooSmall;
 use crate::net::ipv4::{address::IPv4Address, protocol::Protocol, ttl::TimeToLive};
+use crate::print::colors::Colorable;
 
 pub struct IPv4Packet<T: AsRef<[u8]>> {
     buffer: T,
@@ -145,9 +146,9 @@ impl<T: AsRef<[u8]>> core::fmt::Display for IPv4Packet<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!(
             "IPv4(source={}, destination={}, protocol={}, ttl={})",
-            self.source(),
-            self.destination(),
-            self.protocol(),
+            self.source().green(),
+            self.destination().bright_green(),
+            self.protocol().blue(),
             self.ttl()
         ))
     }

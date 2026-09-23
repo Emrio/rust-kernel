@@ -1,4 +1,4 @@
-use crate::net::error::BufferTooSmall;
+use crate::{net::error::BufferTooSmall, print::colors::Colorable};
 
 mod field {
     pub const SOURCE: core::ops::Range<usize> = 0..2;
@@ -97,8 +97,8 @@ impl<T: AsRef<[u8]>> core::fmt::Display for UDPPacket<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!(
             "UDP(source={}, destination={}, payload={} bytes)",
-            self.source(),
-            self.destination(),
+            self.source().blue(),
+            self.destination().bright_blue(),
             self.payload().len(),
         ))
     }

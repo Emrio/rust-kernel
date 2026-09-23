@@ -4,6 +4,8 @@ pub mod ethertype;
 use address::EthernetAddress;
 use ethertype::EtherType;
 
+use crate::print::colors::*;
+
 use super::error::BufferTooSmall;
 
 pub struct EthernetFrame<T: AsRef<[u8]>> {
@@ -83,9 +85,9 @@ impl<T: AsRef<[u8]>> core::fmt::Display for EthernetFrame<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!(
             "Ethernet(destination={}, source={}, ethertype={})",
-            self.destination(),
-            self.source(),
-            self.ethertype()
+            self.destination().yellow(),
+            self.source().yellow(),
+            self.ethertype().green()
         ))
     }
 }

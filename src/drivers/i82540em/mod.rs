@@ -15,6 +15,7 @@ use crate::bits::SplitTwice;
 use crate::drivers::i82540em::rx::{enable_rx_interrupts, setup_rx};
 use crate::drivers::i82540em::tx::setup_tx;
 use crate::pci::{config_read_u32, config_write_u32, find_device};
+use crate::print::colors::Colorable;
 
 const ID: u32 = 0x100e_8086;
 const I8254_REG_CTRL: usize = 0x0;
@@ -50,7 +51,12 @@ fn setup_device(bus: u8, device: u8) {
         kprintln!("Not ready!");
         hlt();
     }
-    kprintln!("Link up, speed: {} Mbit/s", eth_device.status().speed());
+    klog!(
+        "i82540em",
+        "Link up, speed: ",
+        eth_device.status().speed().yellow(),
+        " Mbit/s"
+    );
 
     let command = config_read_u32(bus, device, 0, 0x04);
     config_write_u32(bus, device, 0, 0x04, command | PCI_COMMAND_BME);

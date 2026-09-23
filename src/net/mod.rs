@@ -72,7 +72,7 @@ async fn net_loop_logic() {
 
             let context = rx::NetContext::from_device_and_state(device, &state_machine);
             let buffer = tx::generate_dhcp_discover(&context).expect("buffer too small");
-            kprintln!("<- DHCP Discover");
+            klog!("dhcp", "Unconfigured: Sending DISCOVER");
             device.send_packet(&buffer);
         }
 
@@ -81,7 +81,7 @@ async fn net_loop_logic() {
         {
             // DHCP offer was not met with ack, retrying...
             state_machine.dhcp = DHCPStateMachine::Unconfigured(Instant::now());
-            kprintln!("[net state machine] Offered -> Unconfigured");
+            klog!("dhcp", "Offered -> Unconfigured");
         }
 
         DHCPStateMachine::Assigned(DHCPConfiguration { invalid_at, .. })
@@ -92,8 +92,8 @@ async fn net_loop_logic() {
 
             let context = rx::NetContext::from_device_and_state(device, &state_machine);
             let buffer = tx::generate_dhcp_discover(&context).expect("buffer too small");
-            kprintln!("<- DHCP Discover");
-            kprintln!("[net state machine] Assigned -> Unconfigured");
+            klog!("dhcp", "Assigned: Lease expired, sending DISCOVER");
+            klog!("dhcp", "Assigned -> Unconfigured");
             device.send_packet(&buffer);
         }
 

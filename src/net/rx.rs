@@ -21,6 +21,7 @@ use crate::net::ipv4::protocol::Protocol;
 use crate::net::tx::{self, generate_arp_reply, generate_echo_reply, generate_pong_udp_packet};
 use crate::net::udp::UDPPacket;
 use crate::net::{DHCPConfiguration, DHCPStateMachine, STATE_MACHINE, StateMachine, dhcp};
+use crate::print::colors::Colorable;
 use crate::time::Instant;
 
 pub(crate) static WAKER: AtomicWaker = AtomicWaker::new();
@@ -74,10 +75,10 @@ pub fn process_ethernet_frame(
     ctx: &NetContext,
     frame: &EthernetFrame<&[u8]>,
 ) -> Result<ProcessingResult, BufferTooSmall> {
-    kprintln!("-> Ethernet frame: {}", frame);
+    klog!("net_rx", "Ethernet frame: ", frame);
 
     if !frame.destination().is_broadcast() && frame.destination() != ctx.hardware_address() {
-        kprintln!("-> This frame is not for me.");
+        klog!("net_rx", "This frame is not for me.");
         return Ok(ProcessingResult::Nothing);
     }
 
@@ -85,7 +86,7 @@ pub fn process_ethernet_frame(
         EtherType::ARP => {
             let arp = ARPPacket::new(frame.payload())?;
 
-            kprintln!("-> ARP packet: {}", arp);
+            klog!("net_rx", "ARP packet: ", arp);
 
             // if arp.operation() == ARPOperation::Reply
             //     && ctx.ipv4_address().is_none()
@@ -99,10 +100,12 @@ pub fn process_ethernet_frame(
                 && let Some(ipv4_address) = ctx.ipv4_address()
                 && ipv4_address == arp.target_protocol_address()
             {
-                kprintln!(
-                    "-> {}/{} wants my hardware address!",
-                    arp.sender_hardware_address(),
-                    arp.sender_protocol_address()
+                klog!(
+                    "arp",
+                    arp.sender_hardware_address().yellow(),
+                    "/",
+                    arp.sender_protocol_address().green(),
+                    " wants my hardware address!"
                 );
 
                 return Ok(ProcessingResult::Respond(generate_arp_reply(
@@ -115,12 +118,12 @@ pub fn process_ethernet_frame(
 
         EtherType::IPv4 => {
             let ipv4 = IPv4Packet::new(frame.payload())?;
-            kprintln!("-> IPv4 packet: {}", ipv4);
+            klog!("net_rx", "IPv4 packet: ", ipv4);
 
             if let Some(ipv4_address) = ctx.ipv4_address()
                 && ipv4_address != ipv4.destination()
             {
-                kprintln!("-> IP packet is not for me");
+                klog!("net_rx", "IP packet is not for me");
                 return Ok(ProcessingResult::Nothing);
             }
 
@@ -128,16 +131,16 @@ pub fn process_ethernet_frame(
                 Protocol::ICMP => {
                     let icmp = ICMPPacket::new(ipv4.payload())?;
 
-                    kprintln!("-> ICMP packet: {}", icmp);
+                    klog!("net_rx", "ICMP packet: ", icmp);
 
                     if icmp.is_echo_request() {
-                        kprintln!("-> Echo request, generating response!");
+                        klog!("net_rx", "Echo request, generating response!");
                         return Ok(ProcessingResult::Respond(generate_echo_reply(
                             ctx, frame, &ipv4, &icmp,
                         )?));
                     }
 
-                    kprintln!("-> ICMP packet is not echo request");
+                    klog!("net_rx", "ICMP packet is not echo request");
                     Ok(ProcessingResult::Nothing)
                 }
 
@@ -145,14 +148,14 @@ pub fn process_ethernet_frame(
 
                 Protocol::UDP => {
                     let udp = UDPPacket::new(ipv4.payload())?;
-                    kprintln!("-> UDP packet: {}", udp);
+                    klog!("net_rx", "UDP packet: ", udp);
 
                     if udp.source() == dhcp::ports::SERVER
                         && udp.destination() == dhcp::ports::CLIENT
                         && ctx.ipv4_address.is_none()
                     {
                         let dhcp = DHCPPacket::new(udp.payload())?;
-                        kprintln!("-> DHCP packet: {}", dhcp);
+                        klog!("net_rx", "DHCP packet: ", dhcp);
 
                         let message_type = dhcp.options().get_message_type();
 
@@ -199,13 +202,14 @@ pub fn process_ethernet_frame(
 }
 
 pub fn handle_incoming_ethernet_packet(buffer: &[u8]) {
-    kprintln!("-> Processing incoming packet...");
     // kprintln!("-> {:02x?} (size: {})", buffer, buffer.len());
 
     let Ok(frame) = EthernetFrame::new(buffer) else {
-        kprintln!(
-            "-> Error: Couldn't parse incoming frame of size {}",
-            buffer.len()
+        klog!(
+            "net_rx",
+            "Error".red(),
+            ": Couldn't parse incoming frame of size",
+            buffer.len().yellow()
         );
         return;
     };
@@ -223,12 +227,20 @@ pub fn handle_incoming_ethernet_packet(buffer: &[u8]) {
             state.dhcp = DHCPStateMachine::Offered(Instant::now());
         }
         Ok(ProcessingResult::DHCPAccepted(configuration)) => {
-            kprintln!("[dhcp] Now configured: {}", configuration.ipv4);
+            klog!(
+                "dhcp",
+                "Now configured: ",
+                configuration.ipv4.bright_green()
+            );
             state.dhcp = DHCPStateMachine::Assigned(configuration)
         }
         Ok(ProcessingResult::Respond(buffer)) => device.send_packet(&buffer),
         Err(BufferTooSmall) => {
-            kprintln!("-> Err: Could not decode packet: the packet is too small")
+            klog!(
+                "net_rx",
+                "Error".red(),
+                ": Could not decode packet: the packet is too small",
+            );
         }
     }
 }

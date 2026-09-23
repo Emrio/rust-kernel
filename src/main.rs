@@ -10,11 +10,11 @@ use bootloader::{BootInfo, entry_point};
 use core::future::join;
 use core::panic::PanicInfo;
 use rust_kernel::executor::block_on;
-use rust_kernel::keyboard;
 use rust_kernel::memory::init_memory;
 use rust_kernel::net;
 use rust_kernel::time::init_time;
-use rust_kernel::{hlt_loop, init, kprintln};
+use rust_kernel::{hlt_loop, init};
+use rust_kernel::{keyboard, klog};
 
 entry_point!(kmain);
 
@@ -23,7 +23,7 @@ fn kmain(boot_info: &'static BootInfo) -> ! {
     init_memory(boot_info.physical_memory_offset, &boot_info.memory_map);
     block_on(init_time());
 
-    kprintln!("Hello, world!");
+    klog!("kmain", "Hello, world!");
 
     #[cfg(test)]
     test_main();
@@ -41,6 +41,7 @@ fn kmain(boot_info: &'static BootInfo) -> ! {
 #[cfg(not(test))]
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
+    use rust_kernel::kprintln;
     use rust_kernel::qemu::exit::{QemuExitCode, exit_qemu};
     kprintln!("{}", info);
     exit_qemu(QemuExitCode::Failed)
