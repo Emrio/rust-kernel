@@ -18,6 +18,8 @@ use crate::net::ipv4::protocol::Protocol;
 use crate::net::ipv4::ttl::TimeToLive;
 use crate::net::ipv4::{IPV4_PACKET, IPv4Packet};
 use crate::net::rx::NetContext;
+use crate::net::tcp::sequence::Sequence;
+use crate::net::tcp::{TCP_HEADER, TCPPacket};
 use crate::net::udp::{UDP_HEADER, UDPPacket};
 
 pub fn generate_arp_reply(
@@ -201,7 +203,7 @@ pub fn generate_ipv4(
     })
 }
 
-enum L2 {
+pub(crate) enum L2 {
     Ethernet {
         source: EthernetAddress,
         destination: EthernetAddress,
@@ -230,7 +232,7 @@ impl<'a> L2Frame<'a> {
     }
 }
 
-enum L3 {
+pub(crate) enum L3 {
     IPv4 {
         source: IPv4Address,
         destination: IPv4Address,
@@ -265,13 +267,39 @@ impl<'a> L3Frame<'a> {
             Self::IPv4(frame) => frame.payload_mut(),
         }
     }
+
+    fn source(&self) -> IPv4Address {
+        let L3Frame::IPv4(ipv4_packet) = self;
+        ipv4_packet.source()
+    }
+
+    fn destination(&self) -> IPv4Address {
+        let L3Frame::IPv4(ipv4_packet) = self;
+        ipv4_packet.destination()
+    }
 }
 
-enum L4 {
+pub(crate) enum L4 {
     Buffer(Vec<u8>),
     Udp {
         source: u16,
         destination: u16,
+        next: L7,
+    },
+    Tcp {
+        source: u16,
+        destination: u16,
+        sequence: Sequence,
+        acknowledgment: Sequence,
+        cwr: bool,
+        ece: bool,
+        urg: bool,
+        ack: bool,
+        psh: bool,
+        rst: bool,
+        syn: bool,
+        fin: bool,
+        window: u16,
         next: L7,
     },
     IcmpEcho {
@@ -286,6 +314,7 @@ impl L4 {
         match self {
             Self::Buffer(buffer) => buffer.len(),
             Self::Udp { next, .. } => UDP_HEADER + next.size(),
+            Self::Tcp { next, .. } => TCP_HEADER + next.size(),
             Self::IcmpEcho { next, .. } => ICMP_PACKET + next.size(),
         }
     }
@@ -293,6 +322,7 @@ impl L4 {
 
 enum L4Frame<'a> {
     Udp(UDPPacket<&'a mut [u8]>),
+    Tcp(TCPPacket<&'a mut [u8]>),
     Icmp(ICMPPacket<&'a mut [u8]>),
 }
 
@@ -300,12 +330,13 @@ impl<'a> L4Frame<'a> {
     fn payload_mut(&mut self) -> &mut [u8] {
         match self {
             Self::Udp(frame) => frame.payload_mut(),
+            Self::Tcp(frame) => frame.payload_mut(),
             Self::Icmp(frame) => frame.payload_mut(),
         }
     }
 }
 
-enum L7 {
+pub(crate) enum L7 {
     Buffer(Vec<u8>),
     Dhcp {
         operation: dhcp::operation::Operation,
@@ -324,7 +355,7 @@ impl L7 {
     }
 }
 
-fn build(l2: L2) -> Result<Vec<u8>, BufferTooSmall> {
+pub(crate) fn build(l2: L2) -> Result<Vec<u8>, BufferTooSmall> {
     let packet_size = l2.size();
     let mut packet = vec![0u8; packet_size];
 
@@ -399,6 +430,42 @@ fn build(l2: L2) -> Result<Vec<u8>, BufferTooSmall> {
                 .set_destination(destination)
                 .set_length(l4size);
             (L4Frame::Udp(udp), next)
+        }
+        L4::Tcp {
+            source,
+            destination,
+            sequence,
+            acknowledgment,
+            cwr,
+            ece,
+            urg,
+            ack,
+            psh,
+            rst,
+            syn,
+            fin,
+            window,
+            next,
+        } => {
+            let l3source = l3frame.source();
+            let l3destination = l3frame.destination();
+            let mut tcp = TCPPacket::new(l3frame.payload_mut())?;
+            tcp.set_source(source)
+                .set_destination(destination)
+                .set_sequence(sequence)
+                .set_acknowledgment(acknowledgment)
+                .set_cwr(cwr)
+                .set_ece(ece)
+                .set_urg(urg)
+                .set_ack(ack)
+                .set_psh(psh)
+                .set_rst(rst)
+                .set_syn(syn)
+                .set_fin(fin)
+                .set_window(window)
+                .set_data_offset_and_reserved()
+                .compute_checksum(l3source, l3destination);
+            (L4Frame::Tcp(tcp), next)
         }
         L4::IcmpEcho {
             code,
