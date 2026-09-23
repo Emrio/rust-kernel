@@ -1,3 +1,7 @@
+extern crate alloc;
+
+use alloc::vec::Vec;
+
 use crate::net::error::BufferTooSmall;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PartialOrd, Ord)]
@@ -64,6 +68,30 @@ impl TryInto<IPv4Address> for &[u8] {
 //         Self(address)
 //     }
 // }
+
+pub enum IPv4AddressParseError {
+    MissingThreeDot,
+    ParseU8Error,
+}
+
+impl core::str::FromStr for IPv4Address {
+    type Err = IPv4AddressParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let digits: Vec<&str> = s.split(".").collect();
+
+        let [a, b, c, d] = digits.as_slice() else {
+            Err(IPv4AddressParseError::MissingThreeDot)?
+        };
+
+        let a = a.parse().map_err(|_| IPv4AddressParseError::ParseU8Error)?;
+        let b = b.parse().map_err(|_| IPv4AddressParseError::ParseU8Error)?;
+        let c = c.parse().map_err(|_| IPv4AddressParseError::ParseU8Error)?;
+        let d = d.parse().map_err(|_| IPv4AddressParseError::ParseU8Error)?;
+
+        Ok(IPv4Address::new(a, b, c, d))
+    }
+}
 
 #[cfg(test)]
 mod test {

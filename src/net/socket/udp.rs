@@ -58,15 +58,15 @@ pub struct Socket {
 }
 
 impl Socket {
-    pub fn listen(port: u16) -> Self {
+    pub fn listen(listen: impl Into<Listen>) -> Self {
+        let listen = listen.into();
         let handle = Arc::new(Handle {
             queue: ArrayQueue::new(32),
             waker: AtomicWaker::new(),
         });
-        let listen = Listen::AnyAddress(port);
 
         STATE_MACHINE.lock().udp.add(listen, handle.clone());
-        klog!("udp", "Listening on 0.0.0.0:", port);
+        klog!("udp", "Listening on ", listen);
 
         Self { listen, handle }
     }
@@ -77,7 +77,7 @@ impl Socket {
         }
     }
 
-    pub async fn send(address: IPv4Address, port: u16, payload: &[u8]) {
+    pub async fn send(_address: IPv4Address, _port: u16, _payload: &[u8]) {
         // TODO : Arp resolution + default gateway
         unimplemented!()
     }
