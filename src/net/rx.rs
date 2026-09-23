@@ -78,10 +78,10 @@ pub fn process_ethernet_frame(
     tcp_pool: &mut ConnectionPool,
     frame: &EthernetFrame<&[u8]>,
 ) -> Result<ProcessingResult, BufferTooSmall> {
-    klog!("net_rx", "Ethernet frame: ", frame);
+    // klog!("net_rx", "Ethernet frame: ", frame);
 
     if !frame.destination().is_broadcast() && frame.destination() != ctx.hardware_address() {
-        klog!("net_rx", "This frame is not for me.");
+        // klog!("net_rx", "This frame is not for me.");
         return Ok(ProcessingResult::Nothing);
     }
 
@@ -89,7 +89,7 @@ pub fn process_ethernet_frame(
         EtherType::ARP => {
             let arp = ARPPacket::new(frame.payload())?;
 
-            klog!("net_rx", "ARP packet: ", arp);
+            // klog!("net_rx", "ARP packet: ", arp);
 
             // if arp.operation() == ARPOperation::Reply
             //     && ctx.ipv4_address().is_none()
@@ -121,13 +121,13 @@ pub fn process_ethernet_frame(
 
         EtherType::IPv4 => {
             let ipv4 = IPv4Packet::new(frame.payload())?;
-            klog!("net_rx", "IPv4 packet: ", ipv4);
+            // klog!("net_rx", "IPv4 packet: ", ipv4);
 
             if let Some(ipv4_address) = ctx.ipv4_address()
                 && ipv4_address != ipv4.destination()
                 && ipv4.destination() != IPv4Address::BROADCAST
             {
-                klog!("net_rx", "IP packet is not for me");
+                // klog!("net_rx", "IP packet is not for me");
                 return Ok(ProcessingResult::Nothing);
             }
 
@@ -135,7 +135,7 @@ pub fn process_ethernet_frame(
                 Protocol::ICMP => {
                     let icmp = ICMPPacket::new(ipv4.payload())?;
 
-                    klog!("net_rx", "ICMP packet: ", icmp);
+                    // klog!("net_rx", "ICMP packet: ", icmp);
 
                     if icmp.is_echo_request() {
                         klog!("net_rx", "Echo request, generating response!");
