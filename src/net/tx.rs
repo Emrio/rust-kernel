@@ -4,7 +4,6 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::net::arp::{ARP_PACKET, ARPOperation, ARPPacket, HardwareType, ProtocolType};
-use crate::net::device::NetworkDevice;
 use crate::net::dhcp::option::DHCPOption;
 use crate::net::dhcp::{self, DHCP_HEADER, DHCPPacket};
 use crate::net::error::BufferTooSmall;
@@ -41,26 +40,6 @@ pub fn generate_arp_reply(
     })
 }
 
-pub fn send_arp_request(device: &impl NetworkDevice) {
-    kprintln!("<- Sending ARP request");
-
-    let packet = build(L2::Ethernet {
-        source: device.hardware_address(),
-        destination: EthernetAddress::BROADCAST,
-        ethertype: EtherType::ARP,
-        next: L3::Arp {
-            operation: ARPOperation::Request,
-            sender_hardware_address: device.hardware_address(),
-            sender_protocol_address: IPv4Address::new(10, 0, 2, 3),
-            target_hardware_address: EthernetAddress::BROADCAST,
-            target_protocol_address: IPv4Address::new(10, 0, 2, 2),
-        },
-    })
-    .unwrap();
-
-    device.send_packet(&packet);
-}
-
 pub fn generate_echo_reply(
     ctx: &NetContext,
     request_frame: &EthernetFrame<&[u8]>,
@@ -79,34 +58,6 @@ pub fn generate_echo_reply(
                 code: 0,
                 icmp_type: IcmpType::EchoReply,
                 next: L7::Buffer(request_echo.payload().to_vec()),
-            },
-        },
-    })
-}
-
-pub fn generate_pong_udp_packet(
-    ctx: &NetContext,
-    request_frame: &EthernetFrame<&[u8]>,
-    request_ipv4: &IPv4Packet<&[u8]>,
-    request_udp: &UDPPacket<&[u8]>,
-) -> Result<Vec<u8>, BufferTooSmall> {
-    const PREFIX: &str = "Pong: ";
-    let mut payload = vec![0u8; request_udp.payload().len() + PREFIX.len()];
-    payload[0..PREFIX.len()].copy_from_slice(PREFIX.as_bytes());
-    payload[PREFIX.len()..].copy_from_slice(request_udp.payload());
-
-    build(L2::Ethernet {
-        source: ctx.hardware_address(),
-        destination: request_frame.source(),
-        ethertype: EtherType::IPv4,
-        next: L3::IPv4 {
-            source: ctx.ipv4_address().unwrap_or(request_ipv4.destination()),
-            destination: request_ipv4.source(),
-            protocol: Protocol::UDP,
-            next: L4::Udp {
-                source: request_udp.destination(),
-                destination: request_udp.source(),
-                next: L7::Buffer(payload),
             },
         },
     })

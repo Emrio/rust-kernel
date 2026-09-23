@@ -4,7 +4,6 @@
 #![test_runner(rust_kernel::tests::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 #![feature(future_join)]
-extern crate alloc;
 
 use bootloader::{BootInfo, entry_point};
 use core::future::join;
@@ -12,6 +11,7 @@ use core::panic::PanicInfo;
 use rust_kernel::executor::block_on;
 use rust_kernel::memory::init_memory;
 use rust_kernel::net;
+use rust_kernel::net::socket::listen::Listen;
 use rust_kernel::time::init_time;
 use rust_kernel::{hlt_loop, init};
 use rust_kernel::{keyboard, klog, serial};
@@ -29,9 +29,7 @@ fn kmain(boot_info: &'static BootInfo) -> ! {
     test_main();
 
     let mut state_machine = rust_kernel::net::STATE_MACHINE.lock();
-    state_machine
-        .tcp_pool()
-        .listen(net::tcp::protocol::Listen::AnyAddress(4242));
+    state_machine.tcp_pool().listen(Listen::AnyAddress(4242));
     drop(state_machine);
 
     rust_kernel::drivers::i82540em::find_and_setup_ethernet_controller();
@@ -39,7 +37,8 @@ fn kmain(boot_info: &'static BootInfo) -> ! {
         net::rx_loop(),
         net::net_loop(),
         keyboard::print_keypresses(),
-        serial::print_keypresses()
+        serial::print_keypresses(),
+        net::pong::udp_pong_server(4242)
     ));
 
     hlt_loop()

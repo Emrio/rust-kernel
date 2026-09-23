@@ -3,21 +3,27 @@ use core::time::Duration;
 use crate::drivers::i82540em::DEVICE;
 use crate::net::device::NetworkDevice;
 use crate::net::ipv4::mask::IPv4Mask;
+use crate::net::socket::UDPListenerPool;
 use crate::net::tcp::protocol::ConnectionPool;
 use crate::time::{Instant, sleep};
 use ipv4::address::IPv4Address;
 
-pub mod arp;
+// utils
 pub mod checksum;
 pub mod device;
-pub mod dhcp;
 pub mod error;
+pub mod pong;
+pub mod rx;
+pub mod socket;
+mod tx;
+
+// protocols
+pub mod arp;
+pub mod dhcp;
 pub mod ethernet;
 pub mod icmp;
 pub mod ipv4;
-pub mod rx;
 pub mod tcp;
-mod tx;
 pub mod udp;
 
 #[cfg(test)]
@@ -42,6 +48,7 @@ enum DHCPStateMachine {
 pub struct StateMachine {
     dhcp: DHCPStateMachine,
     tcp: ConnectionPool,
+    udp: UDPListenerPool,
 }
 
 impl StateMachine {
@@ -60,6 +67,7 @@ impl StateMachine {
 pub static STATE_MACHINE: spin::Mutex<StateMachine> = spin::Mutex::new(StateMachine {
     dhcp: DHCPStateMachine::Unconfigured(Instant::zero()),
     tcp: ConnectionPool::new(),
+    udp: UDPListenerPool::new(),
 });
 
 async fn net_loop_logic() {

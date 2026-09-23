@@ -1,0 +1,182 @@
+extern crate alloc;
+
+use alloc::collections::BTreeMap;
+use alloc::sync::Arc;
+use alloc::vec::Vec;
+use core::task::Poll;
+
+use crossbeam_queue::ArrayQueue;
+use futures_util::task::AtomicWaker;
+
+use crate::drivers::i82540em::DEVICE;
+use crate::net::STATE_MACHINE;
+use crate::net::device::NetworkDevice;
+use crate::net::ethernet::EthernetFrame;
+use crate::net::ethernet::address::EthernetAddress;
+use crate::net::ethernet::ethertype::EtherType;
+use crate::net::ipv4::IPv4Packet;
+use crate::net::ipv4::address::IPv4Address;
+use crate::net::ipv4::protocol::Protocol;
+use crate::net::rx::NetContext;
+use crate::net::socket::listen::Listen;
+use crate::net::tx::{L2, L3, L4, L7, build};
+use crate::net::udp::UDPPacket;
+use crate::print::colors::Colorable;
+
+pub struct MessageAccept {
+    handle: Arc<Handle>,
+}
+
+impl Future for MessageAccept {
+    type Output = Message;
+
+    fn poll(
+        self: core::pin::Pin<&mut Self>,
+        cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<Self::Output> {
+        if let Some(message) = self.handle.queue.pop() {
+            return Poll::Ready(message);
+        }
+
+        self.handle.waker.register(cx.waker());
+
+        match self.handle.queue.pop() {
+            Some(message) => Poll::Ready(message),
+            None => Poll::Pending,
+        }
+    }
+}
+
+struct Handle {
+    queue: ArrayQueue<Message>,
+    waker: AtomicWaker,
+}
+
+pub struct Socket {
+    listen: Listen,
+    handle: Arc<Handle>,
+}
+
+impl Socket {
+    pub fn listen(port: u16) -> Self {
+        let handle = Arc::new(Handle {
+            queue: ArrayQueue::new(32),
+            waker: AtomicWaker::new(),
+        });
+        let listen = Listen::AnyAddress(port);
+
+        STATE_MACHINE.lock().udp.add(listen, handle.clone());
+        klog!("udp", "Listening on 0.0.0.0:", port);
+
+        Self { listen, handle }
+    }
+
+    pub fn accept(&self) -> MessageAccept {
+        MessageAccept {
+            handle: self.handle.clone(),
+        }
+    }
+}
+
+impl Drop for Socket {
+    fn drop(&mut self) {
+        STATE_MACHINE.lock().udp.remove(&self.listen);
+    }
+}
+
+pub struct Message {
+    local_port: u16,
+    remote_ethernet_address: EthernetAddress,
+    remote_address: IPv4Address,
+    remote_port: u16,
+    payload: Vec<u8>,
+}
+
+pub struct DHCPNotReady;
+
+impl Message {
+    pub fn new(
+        frame: &EthernetFrame<&[u8]>,
+        ipv4: &IPv4Packet<&[u8]>,
+        udp: &UDPPacket<&[u8]>,
+    ) -> Self {
+        Self {
+            remote_ethernet_address: frame.source(),
+            remote_address: ipv4.source(),
+            remote_port: udp.source(),
+            local_port: udp.destination(),
+            payload: udp.payload().to_vec(),
+        }
+    }
+
+    pub fn remote_address(&self) -> IPv4Address {
+        self.remote_address
+    }
+
+    pub fn remote_port(&self) -> u16 {
+        self.remote_port
+    }
+
+    pub fn payload(&self) -> &[u8] {
+        &self.payload
+    }
+
+    pub fn send(&self, buffer: &[u8]) -> Result<(), DHCPNotReady> {
+        let state = STATE_MACHINE.lock();
+        let device = DEVICE.get().expect("device to be ready");
+        let context = NetContext::from_device_and_state(device, &state);
+        device.send_packet(
+            &build(L2::Ethernet {
+                source: context.hardware_address(),
+                destination: self.remote_ethernet_address,
+                ethertype: EtherType::IPv4,
+                next: L3::IPv4 {
+                    source: context.ipv4_address().ok_or(DHCPNotReady)?,
+                    destination: self.remote_address,
+                    protocol: Protocol::UDP,
+                    next: L4::Udp {
+                        source: self.local_port,
+                        destination: self.remote_port,
+                        next: L7::Buffer(buffer.to_vec()),
+                    },
+                },
+            })
+            .expect("buffer to be of correct size"),
+        );
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+pub struct ListenerPool {
+    listeners: BTreeMap<Listen, Arc<Handle>>,
+}
+
+impl ListenerPool {
+    pub const fn new() -> Self {
+        Self {
+            listeners: BTreeMap::new(),
+        }
+    }
+
+    fn add(&mut self, listen: Listen, handle: Arc<Handle>) {
+        self.listeners.insert(listen, handle);
+    }
+
+    fn remove(&mut self, listen: &Listen) {
+        self.listeners.remove(listen);
+    }
+
+    pub fn accept(&self, message: Message) {
+        let local_port = message.local_port;
+        let Some(handle) = self.listeners.get(&Listen::AnyAddress(local_port)) else {
+            klog!("udp", "Cannot find handle for port ", local_port.yellow());
+            return;
+        };
+
+        if handle.queue.push(message).is_err() {
+            klog!("udp", "Queue full for port ", local_port.yellow())
+        }
+        handle.waker.wake();
+    }
+}

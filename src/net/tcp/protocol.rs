@@ -7,6 +7,7 @@ use alloc::vec::Vec;
 use crate::net::error::BufferTooSmall;
 use crate::net::ipv4::IPv4Packet;
 use crate::net::ipv4::address::IPv4Address;
+use crate::net::socket::listen::Listen;
 use crate::net::tcp::sequence::Sequence;
 use crate::net::tcp::{TCP_HEADER, TCPPacket};
 use crate::print::colors::Colorable;
@@ -38,12 +39,6 @@ pub struct TransmissionControlBlock {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 struct Id(IPv4Address, u16, IPv4Address, u16);
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Listen {
-    AnyAddress(u16),
-    SpecificAddress(IPv4Address, u16),
-}
 
 #[derive(Debug, PartialEq, Eq)]
 enum State {

@@ -1,6 +1,5 @@
 extern crate alloc;
 
-use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::net::arp::{ARP_PACKET, ARPOperation, ARPPacket, HardwareType, ProtocolType};
@@ -11,11 +10,11 @@ use crate::net::icmp::icmp_type::IcmpType;
 use crate::net::icmp::{ECHO_PACKET, ICMPPacket};
 use crate::net::ipv4::address::IPv4Address;
 use crate::net::ipv4::protocol::Protocol;
-use crate::net::ipv4::ttl::TimeToLive;
 use crate::net::ipv4::{IPV4_PACKET, IPv4Packet};
 use crate::net::rx::{NetContext, ProcessingResult, process_ethernet_frame};
+use crate::net::socket::listen::Listen;
 use crate::net::tcp::TCPPacket;
-use crate::net::tcp::protocol::{ConnectionPool, Listen};
+use crate::net::tcp::protocol::ConnectionPool;
 use crate::net::tcp::sequence::Sequence;
 use crate::net::tx::{L2, L3, L4, L7, build};
 

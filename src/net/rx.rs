@@ -18,9 +18,10 @@ use crate::net::icmp::ICMPPacket;
 use crate::net::ipv4::IPv4Packet;
 use crate::net::ipv4::address::IPv4Address;
 use crate::net::ipv4::protocol::Protocol;
+use crate::net::socket::UDPMessage;
 use crate::net::tcp::TCPPacket;
 use crate::net::tcp::protocol::ConnectionPool;
-use crate::net::tx::{self, generate_arp_reply, generate_echo_reply, generate_pong_udp_packet};
+use crate::net::tx::{self, generate_arp_reply, generate_echo_reply};
 use crate::net::udp::UDPPacket;
 use crate::net::{DHCPConfiguration, DHCPStateMachine, STATE_MACHINE, StateMachine, dhcp};
 use crate::print::colors::Colorable;
@@ -70,6 +71,7 @@ pub enum ProcessingResult {
     DHCPReset,
     DHCPOffered(Vec<u8>),
     DHCPAccepted(DHCPConfiguration),
+    PushUdpMessage(UDPMessage),
     Respond(Vec<u8>),
 }
 
@@ -211,9 +213,8 @@ pub fn process_ethernet_frame(
                         };
                     }
 
-                    Ok(ProcessingResult::Respond(generate_pong_udp_packet(
-                        ctx, frame, &ipv4, &udp,
-                    )?))
+                    let message = UDPMessage::new(frame, &ipv4, &udp);
+                    Ok(ProcessingResult::PushUdpMessage(message))
                 }
             }
         }
@@ -254,6 +255,7 @@ pub fn handle_incoming_ethernet_packet(buffer: &[u8]) {
             state.dhcp = DHCPStateMachine::Assigned(configuration)
         }
         Ok(ProcessingResult::Respond(buffer)) => device.send_packet(&buffer),
+        Ok(ProcessingResult::PushUdpMessage(message)) => state.udp.accept(message),
         Err(BufferTooSmall) => {
             klog!(
                 "net_rx",
