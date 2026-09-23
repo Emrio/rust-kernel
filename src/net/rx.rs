@@ -18,6 +18,7 @@ use crate::net::icmp::ICMPPacket;
 use crate::net::ipv4::IPv4Packet;
 use crate::net::ipv4::address::IPv4Address;
 use crate::net::ipv4::protocol::Protocol;
+use crate::net::tcp::TCPPacket;
 use crate::net::tx::{self, generate_arp_reply, generate_echo_reply, generate_pong_udp_packet};
 use crate::net::udp::UDPPacket;
 use crate::net::{DHCPConfiguration, DHCPStateMachine, STATE_MACHINE, StateMachine, dhcp};
@@ -145,7 +146,12 @@ pub fn process_ethernet_frame(
                     Ok(ProcessingResult::Nothing)
                 }
 
-                Protocol::TCP => todo!(),
+                Protocol::TCP => {
+                    let tcp = TCPPacket::new(ipv4.payload())?;
+                    klog!("net_rx", "TCP packet: ", tcp);
+
+                    Ok(ProcessingResult::Nothing)
+                }
 
                 Protocol::UDP => {
                     let udp = UDPPacket::new(ipv4.payload())?;

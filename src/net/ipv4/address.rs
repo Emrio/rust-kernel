@@ -1,6 +1,6 @@
 use crate::net::error::BufferTooSmall;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PartialOrd, Ord)]
 pub struct IPv4Address([u8; 4]);
 
 impl IPv4Address {

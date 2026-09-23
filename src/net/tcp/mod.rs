@@ -1,14 +1,21 @@
+mod header;
 pub mod protocol;
+pub mod sequence;
 
 use core::ops::Not;
 
-use crate::{net::error::BufferTooSmall, print::colors::Colorable};
+use crate::net::error::BufferTooSmall;
+use crate::net::ipv4::address::IPv4Address;
+use crate::net::tcp::header::compute_checksum;
+use crate::net::tcp::sequence::Sequence;
+use crate::print::colors::Colorable;
 
 mod field {
     pub const SOURCE: core::ops::Range<usize> = 0..2;
     pub const DESTINATION: core::ops::Range<usize> = 2..4;
     pub const SEQ: core::ops::Range<usize> = 4..8;
-    pub const ACKNOWLEDGMENT: core::ops::Range<usize> = 8..12;
+    pub const ACK: core::ops::Range<usize> = 8..12;
+    pub const DATA_OFFSET: usize = 12;
     pub const FLAGS: usize = 13;
     pub const WINDOW: core::ops::Range<usize> = 14..16;
     pub const CHECKSUM: core::ops::Range<usize> = 16..18;
@@ -72,20 +79,26 @@ impl<T: AsRef<[u8]>> TCPPacket<T> {
         )
     }
 
-    pub fn sequence(&self) -> u32 {
+    pub fn sequence(&self) -> Sequence {
         u32::from_be_bytes(
             self.buffer.as_ref()[field::SEQ]
                 .try_into()
                 .expect("SEQ to be 4 bytes"),
         )
+        .into()
     }
 
-    pub fn acknowledgment(&self) -> u32 {
+    pub fn acknowledgment(&self) -> Sequence {
         u32::from_be_bytes(
-            self.buffer.as_ref()[field::ACKNOWLEDGMENT]
+            self.buffer.as_ref()[field::ACK]
                 .try_into()
                 .expect("ACK to be 4 bytes"),
         )
+        .into()
+    }
+
+    pub fn data_offset_and_reserved(&self) -> u8 {
+        self.buffer.as_ref()[field::DATA_OFFSET]
     }
 
     pub fn cwr(&self) -> bool {
@@ -160,13 +173,18 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> TCPPacket<T> {
         self
     }
 
-    pub fn set_sequence(&mut self, seq: u32) -> &mut Self {
-        self.buffer.as_mut()[field::SEQ].copy_from_slice(&seq.to_be_bytes());
+    pub fn set_sequence(&mut self, seq: Sequence) -> &mut Self {
+        self.buffer.as_mut()[field::SEQ].copy_from_slice(&Into::<u32>::into(seq).to_be_bytes());
         self
     }
 
-    pub fn set_acknowledgment(&mut self, ack: u32) -> &mut Self {
-        self.buffer.as_mut()[field::ACKNOWLEDGMENT].copy_from_slice(&ack.to_be_bytes());
+    pub fn set_acknowledgment(&mut self, ack: Sequence) -> &mut Self {
+        self.buffer.as_mut()[field::ACK].copy_from_slice(&Into::<u32>::into(ack).to_be_bytes());
+        self
+    }
+
+    pub fn set_data_offset_and_reserved(&mut self) -> &mut Self {
+        self.buffer.as_mut()[field::DATA_OFFSET] = 5 << 4;
         self
     }
 
@@ -226,6 +244,12 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> TCPPacket<T> {
     pub fn set_checksum(&mut self, checksum: u16) -> &mut Self {
         self.buffer.as_mut()[field::CHECKSUM].copy_from_slice(&checksum.to_be_bytes());
         self
+    }
+
+    pub fn compute_checksum(&mut self, source: IPv4Address, destination: IPv4Address) -> &mut Self {
+        self.set_checksum(0);
+        let checksum = compute_checksum(source, destination, self);
+        self.set_checksum(checksum)
     }
 
     pub fn set_urgent(&mut self, urgent: u16) -> &mut Self {
