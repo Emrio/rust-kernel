@@ -20,7 +20,6 @@ mod field {
     pub const WINDOW: core::ops::Range<usize> = 14..16;
     pub const CHECKSUM: core::ops::Range<usize> = 16..18;
     pub const URGENT: core::ops::Range<usize> = 18..20;
-    pub const PAYLOAD: core::ops::RangeFrom<usize> = 20..;
 }
 
 mod flags {
@@ -158,7 +157,8 @@ impl<T: AsRef<[u8]>> TCPPacket<T> {
     }
 
     pub fn payload(&self) -> &[u8] {
-        &self.buffer.as_ref()[field::PAYLOAD]
+        let payload_begin = (self.data_offset_and_reserved() as usize >> 4) * 4;
+        &self.buffer.as_ref()[payload_begin..]
     }
 }
 
@@ -258,7 +258,8 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> TCPPacket<T> {
     }
 
     pub fn payload_mut(&mut self) -> &mut [u8] {
-        &mut self.buffer.as_mut()[field::PAYLOAD]
+        let payload_begin = (self.data_offset_and_reserved() as usize >> 4) * 4;
+        &mut self.buffer.as_mut()[payload_begin..]
     }
 }
 
