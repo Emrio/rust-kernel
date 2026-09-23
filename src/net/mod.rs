@@ -51,9 +51,13 @@ impl StateMachine {
             _ => None,
         }
     }
+
+    pub fn tcp_pool(&mut self) -> &mut ConnectionPool {
+        &mut self.tcp
+    }
 }
 
-static STATE_MACHINE: spin::Mutex<StateMachine> = spin::Mutex::new(StateMachine {
+pub static STATE_MACHINE: spin::Mutex<StateMachine> = spin::Mutex::new(StateMachine {
     dhcp: DHCPStateMachine::Unconfigured(Instant::zero()),
     tcp: ConnectionPool::new(),
 });

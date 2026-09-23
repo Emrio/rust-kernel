@@ -28,6 +28,12 @@ fn kmain(boot_info: &'static BootInfo) -> ! {
     #[cfg(test)]
     test_main();
 
+    let mut state_machine = rust_kernel::net::STATE_MACHINE.lock();
+    state_machine
+        .tcp_pool()
+        .listen(net::tcp::protocol::Listen::AnyAddress(4242));
+    drop(state_machine);
+
     rust_kernel::drivers::i82540em::find_and_setup_ethernet_controller();
     block_on(join!(
         net::rx_loop(),
