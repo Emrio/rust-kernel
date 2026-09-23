@@ -42,7 +42,7 @@ run-command = [
   "-display",
   "none",
   "-netdev",
-  "user,id=n",
+  "vmnet-bridged,id=n,ifname=en0",
   "-device",
   "e1000,netdev=n",
   # Dump all network traffic to ease up debugging
