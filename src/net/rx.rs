@@ -65,7 +65,7 @@ impl NetContext {
 pub enum ProcessingResult {
     Nothing,
     DHCPReset,
-    DHCPOffered,
+    DHCPOffered(Vec<u8>),
     DHCPAccepted(DHCPConfiguration),
     Respond(Vec<u8>),
 }
@@ -157,9 +157,11 @@ pub fn process_ethernet_frame(
                         let message_type = dhcp.options().get_message_type();
 
                         return match message_type {
-                            Some(dhcp::option::MessageType::Offer) => Ok(
-                                ProcessingResult::Respond(tx::generate_dhcp_request(ctx, &dhcp)?),
-                            ),
+                            Some(dhcp::option::MessageType::Offer) => {
+                                Ok(ProcessingResult::DHCPOffered(tx::generate_dhcp_request(
+                                    ctx, &dhcp,
+                                )?))
+                            }
                             Some(dhcp::option::MessageType::Ack) => {
                                 let Some(invalid_at) = dhcp
                                     .options()
@@ -216,8 +218,12 @@ pub fn handle_incoming_ethernet_packet(buffer: &[u8]) {
         Ok(ProcessingResult::DHCPReset) => {
             state.dhcp = DHCPStateMachine::Unconfigured(Instant::now())
         }
-        Ok(ProcessingResult::DHCPOffered) => state.dhcp = DHCPStateMachine::Offered(Instant::now()),
+        Ok(ProcessingResult::DHCPOffered(buffer)) => {
+            device.send_packet(&buffer);
+            state.dhcp = DHCPStateMachine::Offered(Instant::now());
+        }
         Ok(ProcessingResult::DHCPAccepted(configuration)) => {
+            kprintln!("[dhcp] Now configured: {}", configuration.ipv4);
             state.dhcp = DHCPStateMachine::Assigned(configuration)
         }
         Ok(ProcessingResult::Respond(buffer)) => device.send_packet(&buffer),

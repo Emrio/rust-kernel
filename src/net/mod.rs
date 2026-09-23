@@ -65,21 +65,23 @@ async fn net_loop_logic() {
 
     match state_machine.dhcp {
         DHCPStateMachine::Unconfigured(last_request)
-            if last_request.from_now() > Duration::from_secs(1) =>
+            if last_request.from_now() > Duration::from_secs(5) =>
         {
             // No DHCP configuration
             state_machine.dhcp = DHCPStateMachine::Unconfigured(Instant::now());
 
             let context = rx::NetContext::from_device_and_state(device, &state_machine);
             let buffer = tx::generate_dhcp_discover(&context).expect("buffer too small");
+            kprintln!("<- DHCP Discover");
             device.send_packet(&buffer);
         }
 
         DHCPStateMachine::Offered(offered_time)
-            if offered_time.from_now() > Duration::from_secs(5) =>
+            if offered_time.from_now() > Duration::from_secs(10) =>
         {
             // DHCP offer was not met with ack, retrying...
             state_machine.dhcp = DHCPStateMachine::Unconfigured(Instant::now());
+            kprintln!("[net state machine] Offered -> Unconfigured");
         }
 
         DHCPStateMachine::Assigned(DHCPConfiguration { invalid_at, .. })
@@ -90,6 +92,8 @@ async fn net_loop_logic() {
 
             let context = rx::NetContext::from_device_and_state(device, &state_machine);
             let buffer = tx::generate_dhcp_discover(&context).expect("buffer too small");
+            kprintln!("<- DHCP Discover");
+            kprintln!("[net state machine] Assigned -> Unconfigured");
             device.send_packet(&buffer);
         }
 

@@ -133,6 +133,7 @@ pub fn generate_dhcp_discover(ctx: &NetContext) -> Result<Vec<u8>, BufferTooSmal
                             dhcp::option::ParameterRequest::Router,
                             dhcp::option::ParameterRequest::DomainNameServer,
                         ]),
+                        DHCPOption::Hostname("RustKernel".into()),
                         DHCPOption::End,
                     ],
                 },
@@ -148,7 +149,11 @@ pub fn generate_dhcp_request(
     // request_udp: &UDPPacket<&[u8]>,
     dhcp_offer: &DHCPPacket<&[u8]>,
 ) -> Result<Vec<u8>, BufferTooSmall> {
-    let mut options = vec![DHCPOption::MessageType(dhcp::option::MessageType::Request)];
+    let mut options = vec![
+        DHCPOption::MessageType(dhcp::option::MessageType::Request),
+        DHCPOption::RequestedAddress(dhcp_offer.your_address()),
+        DHCPOption::Hostname("RustKernel".into()),
+    ];
     if let Some(id) = dhcp_offer.options().get_server_identifier() {
         options.push(DHCPOption::ServerIdentifier(id));
     }

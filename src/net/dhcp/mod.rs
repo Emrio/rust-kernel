@@ -185,6 +185,9 @@ impl<T: AsRef<[u8]>> core::fmt::Display for DHCPPacket<T> {
                 option::DHCPOption::ParameterRequestList(parameter_requests) => {
                     f.write_fmt(format_args!(", request_params={parameter_requests:?}"))?
                 }
+                option::DHCPOption::RequestedAddress(address) => {
+                    f.write_fmt(format_args!(", request_address={address}"))?
+                }
                 option::DHCPOption::LeaseTime(duration) => {
                     f.write_fmt(format_args!(", lease_time={duration:?}"))?
                 }

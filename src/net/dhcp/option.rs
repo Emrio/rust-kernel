@@ -107,6 +107,7 @@ pub enum DHCPOption {
     Dns(IPv4Address),
     Hostname(String),
     ParameterRequestList(Vec<ParameterRequest>),
+    RequestedAddress(IPv4Address),
     LeaseTime(Duration),
     MessageType(MessageType),
     ServerIdentifier(IPv4Address),
@@ -173,6 +174,11 @@ impl DHCPOption {
                         .map(|parameter| (*parameter).into())
                         .collect::<Vec<u8>>(),
                 );
+                result
+            }
+            DHCPOption::RequestedAddress(address) => {
+                let mut result = vec![50, address.as_bytes().len() as u8];
+                result.extend_from_slice(address.as_bytes());
                 result
             }
 
