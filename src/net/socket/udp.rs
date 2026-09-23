@@ -76,6 +76,11 @@ impl Socket {
             handle: self.handle.clone(),
         }
     }
+
+    pub async fn send(address: IPv4Address, port: u16, payload: &[u8]) {
+        // TODO : Arp resolution + default gateway
+        unimplemented!()
+    }
 }
 
 impl Drop for Socket {
