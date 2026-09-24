@@ -1,10 +1,11 @@
 extern crate alloc;
 
-use core::task::Poll;
-
 use alloc::collections::BTreeMap;
+use alloc::collections::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use core::task::Poll;
+use futures_util::task::AtomicWaker;
 
 use crate::net::STATE_MACHINE;
 use crate::net::handle::Handle;
@@ -12,6 +13,7 @@ use crate::net::ipv4::IPv4Packet;
 use crate::net::ipv4::address::IPv4Address;
 use crate::net::socket::listen::Listen;
 use crate::net::tcp::TCPPacket;
+use crate::net::tcp::protocol::AcceptResult;
 use crate::net::tcp::protocol::{Id, TransmissionControlBlock, generate_rst};
 use crate::print::colors::Colorable;
 
@@ -74,9 +76,52 @@ impl Drop for BoundSocket {
     }
 }
 
-pub struct Connection {}
+struct ByteStream {
+    buffer: spin::Mutex<VecDeque<u8>>,
+    waker: AtomicWaker,
+}
+
+pub struct Connection {
+    stream: Arc<ByteStream>,
+}
+
+pub struct Receive {
+    stream: Arc<ByteStream>,
+}
+
+impl Future for Receive {
+    type Output = Vec<u8>;
+
+    fn poll(
+        self: core::pin::Pin<&mut Self>,
+        cx: &mut core::task::Context<'_>,
+    ) -> Poll<Self::Output> {
+        let mut buffer = self.stream.buffer.lock();
+        if !buffer.is_empty() {
+            return Poll::Ready(buffer.drain(..).collect());
+        }
+        drop(buffer);
+
+        self.stream.waker.register(cx.waker());
+
+        let mut buffer = self.stream.buffer.lock();
+        if !buffer.is_empty() {
+            return Poll::Ready(buffer.drain(..).collect());
+        }
+        Poll::Pending
+    }
+}
 
 impl Connection {
+    fn new() -> Self {
+        Self {
+            stream: Arc::new(ByteStream {
+                buffer: spin::Mutex::new(VecDeque::with_capacity(4096)),
+                waker: AtomicWaker::new(),
+            }),
+        }
+    }
+
     pub fn remote_address(&self) -> IPv4Address {
         todo!()
     }
@@ -89,8 +134,10 @@ impl Connection {
         unimplemented!()
     }
 
-    pub async fn receive(&self) -> &[u8] {
-        todo!()
+    pub fn receive(&self) -> Receive {
+        Receive {
+            stream: self.stream.clone(),
+        }
     }
 
     pub fn close(&self) {
@@ -98,23 +145,27 @@ impl Connection {
     }
 }
 
+impl Drop for Connection {
+    fn drop(&mut self) {
+        todo!()
+    }
+}
+
 enum ConnectionStatus {
     HalfOpen(TransmissionControlBlock, Arc<Handle<Connection>>),
-    Established(TransmissionControlBlock),
+    Established(TransmissionControlBlock, Arc<ByteStream>),
 }
 
 impl ConnectionStatus {
     fn tcb(&self) -> &TransmissionControlBlock {
         match self {
-            ConnectionStatus::HalfOpen(tcb, _) => tcb,
-            ConnectionStatus::Established(tcb) => tcb,
+            ConnectionStatus::HalfOpen(tcb, _) | ConnectionStatus::Established(tcb, _) => tcb,
         }
     }
 
     fn tcb_mut(&mut self) -> &mut TransmissionControlBlock {
         match self {
-            ConnectionStatus::HalfOpen(tcb, _) => tcb,
-            ConnectionStatus::Established(tcb) => tcb,
+            ConnectionStatus::HalfOpen(tcb, _) | ConnectionStatus::Established(tcb, _) => tcb,
         }
     }
 }
@@ -169,33 +220,40 @@ impl ConnectionPool {
         self.connections.get_mut(&id)
     }
 
-    fn establish(&mut self, id: Id) -> bool {
+    fn process_result(&mut self, id: Id, result: AcceptResult) -> Option<Vec<u8>> {
         let Some(connection) = self.connections.remove(&id) else {
-            return false;
+            // this is bad news
+            return None;
         };
 
-        match connection {
-            ConnectionStatus::Established(tcb) => {
-                self.connections
-                    .insert(id, ConnectionStatus::Established(tcb));
-
-                false
-            }
-
-            ConnectionStatus::HalfOpen(tcb, handle) => {
-                let connection = Connection {};
+        let new_connection = match connection {
+            ConnectionStatus::HalfOpen(tcb, handle) if result.established => {
+                let connection = Connection::new();
+                let stream = connection.stream.clone();
 
                 if handle.queue.push(connection).is_err() {
-                    klog!("udp", "Queue full!".red())
+                    klog!("tcp", "Queue full!".red())
                 }
                 handle.waker.wake();
 
-                self.connections
-                    .insert(id, ConnectionStatus::Established(tcb));
-
-                true
+                ConnectionStatus::Established(tcb, stream)
             }
+            ConnectionStatus::Established(tcb, stream) if let Some(received) = result.received => {
+                stream.buffer.lock().extend(received);
+                stream.waker.wake();
+
+                ConnectionStatus::Established(tcb, stream)
+            }
+            connection => connection,
+        };
+
+        self.connections.insert(id, new_connection);
+
+        if result.destroyed {
+            self.connections.remove(&id);
         }
+
+        result.response
     }
 
     pub fn accept(&mut self, ip: &IPv4Packet<&[u8]>, tcp: &TCPPacket<&[u8]>) -> Option<Vec<u8>> {
@@ -220,14 +278,6 @@ impl ConnectionPool {
             .expect("buffer should not be too small");
 
         let id = connection.tcb().id();
-        if result.established && !self.establish(id) {
-            // TODO destroy connection, internal assertion error
-        }
-
-        if result.destroyed {
-            self.connections.remove(&id);
-        }
-
-        result.response
+        self.process_result(id, result)
     }
 }

@@ -32,7 +32,6 @@ pub struct TransmissionControlBlock {
 
     // TODO: queue + waker, maybe impl Stream?
     snd_buf: Vec<u8>,
-    rcv_buf: Vec<u8>,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
@@ -43,6 +42,7 @@ pub struct AcceptResult {
     pub established: bool,
     pub destroyed: bool,
     pub response: Option<Vec<u8>>,
+    pub received: Option<Vec<u8>>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -76,7 +76,6 @@ impl TransmissionControlBlock {
             iss: 0.into(),
             irs: 0.into(),
             snd_buf: Vec::new(),
-            rcv_buf: Vec::new(),
         }
     }
 
@@ -217,6 +216,8 @@ impl TransmissionControlBlock {
             return Ok(AcceptResult::default());
         }
 
+        let mut received = None;
+
         if !packet.payload().is_empty() {
             if packet.sequence() == self.rcv_nxt {
                 klog!(
@@ -228,7 +229,7 @@ impl TransmissionControlBlock {
                     packet.payload().len().yellow(),
                     " bytes"
                 );
-                self.rcv_buf.extend_from_slice(packet.payload());
+                received = Some(packet.payload().to_vec());
                 self.rcv_nxt += packet.payload().len() as u32;
             } else if packet.sequence() < self.rcv_nxt {
                 // already acked
@@ -251,12 +252,14 @@ impl TransmissionControlBlock {
             // TEMPORARY:
             return Ok(AcceptResult {
                 response: self.close()?,
+                received,
                 ..Default::default()
             });
         }
 
         Ok(AcceptResult {
             response: Some(self.generate_ack()?),
+            received,
             ..Default::default()
         })
     }
@@ -435,14 +438,13 @@ mod tests {
             false,
             b"hello",
         );
-        let response = tcb
+        let result = tcb
             .accept(&TCPPacket::new(data.as_slice()).unwrap())
-            .unwrap()
-            .response
-            .expect("expected an ACK");
+            .unwrap();
+        let response = result.response.clone().expect("expected an ACK");
         let response = TCPPacket::new(response.as_slice()).unwrap();
 
-        assert_eq!(tcb.rcv_buf, b"hello");
+        assert_eq!(result.received.as_deref(), Some(b"hello".as_slice()));
         assert_eq!(tcb.rcv_nxt, Sequence::from(rcv_nxt_before + 5));
         assert_eq!(response.acknowledgment(), tcb.rcv_nxt);
     }
@@ -461,22 +463,25 @@ mod tests {
             b"hi",
         );
 
-        tcb.accept(&TCPPacket::new(data.as_slice()).unwrap())
+        let first = tcb
+            .accept(&TCPPacket::new(data.as_slice()).unwrap())
             .unwrap();
-        let buf_after_first = tcb.rcv_buf.clone();
+        assert_eq!(first.received.as_deref(), Some(b"hi".as_slice()));
         let rcv_nxt_after_first = tcb.rcv_nxt;
 
         // Same segment arrives again (e.g. our first ACK got lost on the wire).
-        let response = tcb
+        let second = tcb
             .accept(&TCPPacket::new(data.as_slice()).unwrap())
-            .unwrap()
+            .unwrap();
+        let response = second
             .response
+            .clone()
             .expect("a duplicate segment should still be met with a duplicate ACK");
         let response = TCPPacket::new(response.as_slice()).unwrap();
 
-        assert_eq!(
-            tcb.rcv_buf, buf_after_first,
-            "data must not be appended twice"
+        assert!(
+            second.received.is_none(),
+            "duplicate data must not be delivered twice to the application"
         );
         assert_eq!(tcb.rcv_nxt, rcv_nxt_after_first);
         assert_eq!(response.acknowledgment(), tcb.rcv_nxt);
@@ -499,11 +504,12 @@ mod tests {
             b"late",
         );
 
-        tcb.accept(&TCPPacket::new(data.as_slice()).unwrap())
+        let result = tcb
+            .accept(&TCPPacket::new(data.as_slice()).unwrap())
             .unwrap();
 
         assert_eq!(tcb.rcv_nxt, rcv_nxt_before);
-        assert!(tcb.rcv_buf.is_empty());
+        assert!(result.received.is_none());
     }
 
     #[test_case]
@@ -521,16 +527,15 @@ mod tests {
             false,
             payload,
         );
-        let response = tcb
+        let result = tcb
             .accept(&TCPPacket::new(fin_with_data.as_slice()).unwrap())
-            .unwrap()
-            .response
-            .expect("expected a response");
+            .unwrap();
+        let response = result.response.clone().expect("expected a response");
         let response = TCPPacket::new(response.as_slice()).unwrap();
 
         // 3 bytes of data + 1 for the FIN itself.
         assert_eq!(tcb.rcv_nxt, Sequence::from(rcv_nxt_before + 4));
-        assert_eq!(tcb.rcv_buf, payload);
+        assert_eq!(result.received.as_deref(), Some(payload));
         assert_eq!(response.acknowledgment(), tcb.rcv_nxt);
 
         // `accept` currently auto-closes as soon as a valid FIN is processed
