@@ -12,6 +12,7 @@ use ipv4::address::IPv4Address;
 pub mod checksum;
 pub mod device;
 pub mod error;
+mod handle;
 pub mod pong;
 pub mod rx;
 pub mod socket;

@@ -5,15 +5,13 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::task::Poll;
 
-use crossbeam_queue::ArrayQueue;
-use futures_util::task::AtomicWaker;
-
 use crate::drivers::i82540em::DEVICE;
 use crate::net::STATE_MACHINE;
 use crate::net::device::NetworkDevice;
 use crate::net::ethernet::EthernetFrame;
 use crate::net::ethernet::address::EthernetAddress;
 use crate::net::ethernet::ethertype::EtherType;
+use crate::net::handle::Handle;
 use crate::net::ipv4::IPv4Packet;
 use crate::net::ipv4::address::IPv4Address;
 use crate::net::ipv4::protocol::Protocol;
@@ -24,7 +22,7 @@ use crate::net::udp::UDPPacket;
 use crate::print::colors::Colorable;
 
 pub struct MessageAccept {
-    handle: Arc<Handle>,
+    handle: Arc<Handle<Message>>,
 }
 
 impl Future for MessageAccept {
@@ -47,23 +45,15 @@ impl Future for MessageAccept {
     }
 }
 
-struct Handle {
-    queue: ArrayQueue<Message>,
-    waker: AtomicWaker,
-}
-
 pub struct Socket {
     listen: Listen,
-    handle: Arc<Handle>,
+    handle: Arc<Handle<Message>>,
 }
 
 impl Socket {
     pub fn listen(listen: impl Into<Listen>) -> Self {
         let listen = listen.into();
-        let handle = Arc::new(Handle {
-            queue: ArrayQueue::new(32),
-            waker: AtomicWaker::new(),
-        });
+        let handle = Arc::new(Handle::new(32));
 
         STATE_MACHINE.lock().udp.add(listen, handle.clone());
         klog!("udp", "Listening on ", listen);
@@ -154,7 +144,7 @@ impl Message {
 
 #[derive(Default)]
 pub struct ListenerPool {
-    listeners: BTreeMap<Listen, Arc<Handle>>,
+    listeners: BTreeMap<Listen, Arc<Handle<Message>>>,
 }
 
 impl ListenerPool {
@@ -164,7 +154,7 @@ impl ListenerPool {
         }
     }
 
-    fn add(&mut self, listen: Listen, handle: Arc<Handle>) {
+    fn add(&mut self, listen: Listen, handle: Arc<Handle<Message>>) {
         self.listeners.insert(listen, handle);
     }
 

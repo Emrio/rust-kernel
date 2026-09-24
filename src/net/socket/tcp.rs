@@ -2,14 +2,12 @@ extern crate alloc;
 
 use core::task::Poll;
 
-use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use crossbeam_queue::ArrayQueue;
-use futures_util::task::AtomicWaker;
-
 use crate::net::STATE_MACHINE;
+use crate::net::handle::Handle;
 use crate::net::ipv4::IPv4Packet;
 use crate::net::ipv4::address::IPv4Address;
 use crate::net::socket::listen::Listen;
@@ -17,32 +15,24 @@ use crate::net::tcp::TCPPacket;
 use crate::net::tcp::protocol::{Id, TransmissionControlBlock, generate_rst};
 use crate::print::colors::Colorable;
 
-struct Handle {
-    queue: ArrayQueue<Connection>,
-    waker: AtomicWaker,
-}
-
 pub struct Socket;
 
 impl Socket {
     pub fn listen(listen: impl Into<Listen>) -> BoundSocket {
         let listen = listen.into();
-        let handle = Arc::new(Handle {
-            queue: ArrayQueue::new(32),
-            waker: AtomicWaker::new(),
-        });
+        let handle = Arc::new(Handle::new(16));
         STATE_MACHINE.lock().tcp.listen(listen, handle.clone());
         klog!("tcp", "Listening on ", listen);
         BoundSocket { listen, handle }
     }
 
-    pub fn connect(address: IPv4Address, port: u16) -> Connection {
+    pub fn connect(_address: IPv4Address, _port: u16) -> Connection {
         unimplemented!()
     }
 }
 
 pub struct ConnectionAccept {
-    handle: Arc<Handle>,
+    handle: Arc<Handle<Connection>>,
 }
 
 impl Future for ConnectionAccept {
@@ -67,7 +57,7 @@ impl Future for ConnectionAccept {
 
 pub struct BoundSocket {
     listen: Listen,
-    handle: Arc<Handle>,
+    handle: Arc<Handle<Connection>>,
 }
 
 impl BoundSocket {
@@ -95,7 +85,7 @@ impl Connection {
         todo!()
     }
 
-    pub fn send(&self, buffer: &[u8]) {
+    pub fn send(&self, _buffer: &[u8]) {
         unimplemented!()
     }
 
@@ -109,7 +99,7 @@ impl Connection {
 }
 
 enum ConnectionStatus {
-    HalfOpen(TransmissionControlBlock, Arc<Handle>),
+    HalfOpen(TransmissionControlBlock, Arc<Handle<Connection>>),
     Established(TransmissionControlBlock),
 }
 
@@ -133,7 +123,7 @@ impl ConnectionStatus {
 #[derive(Default)]
 pub struct ConnectionPool {
     connections: BTreeMap<Id, ConnectionStatus>,
-    listeners: BTreeMap<Listen, Arc<Handle>>,
+    listeners: BTreeMap<Listen, Arc<Handle<Connection>>>,
 }
 
 impl ConnectionPool {
@@ -144,7 +134,7 @@ impl ConnectionPool {
         }
     }
 
-    fn listen(&mut self, listen: Listen, handle: Arc<Handle>) {
+    fn listen(&mut self, listen: Listen, handle: Arc<Handle<Connection>>) {
         self.listeners.insert(listen, handle);
     }
 
