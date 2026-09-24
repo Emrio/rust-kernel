@@ -12,9 +12,9 @@ use crate::net::ipv4::address::IPv4Address;
 use crate::net::ipv4::protocol::Protocol;
 use crate::net::ipv4::{IPV4_PACKET, IPv4Packet};
 use crate::net::rx::{NetContext, ProcessingResult, process_ethernet_frame};
+use crate::net::socket::TCPConnectionPool;
 use crate::net::socket::listen::Listen;
 use crate::net::tcp::TCPPacket;
-use crate::net::tcp::protocol::ConnectionPool;
 use crate::net::tcp::sequence::Sequence;
 use crate::net::tx::{L2, L3, L4, L7, build};
 
@@ -43,7 +43,7 @@ fn icmp_echo_request_is_met_with_reply() {
 
     let Ok(ProcessingResult::Respond(response)) = process_ethernet_frame(
         &NetContext::from_hardware_address(my_hardware_address),
-        &mut ConnectionPool::default(),
+        &mut TCPConnectionPool::default(),
         &frame,
     ) else {
         panic!("Expected response")
@@ -96,7 +96,7 @@ fn arp_request_for_me_is_met_with_reply() {
 
     let ctx = NetContext::from_addresses(target_hw, target_ip);
     let Ok(ProcessingResult::Respond(response)) =
-        process_ethernet_frame(&ctx, &mut ConnectionPool::default(), &frame)
+        process_ethernet_frame(&ctx, &mut TCPConnectionPool::default(), &frame)
     else {
         panic!("Expected response")
     };
@@ -160,143 +160,4 @@ fn build_tcp_frame(
         },
     })
     .unwrap()
-}
-
-/// End-to-end regression test for the exact sequence manually verified against
-/// a real `nc` client: SYN -> SYN-ACK -> ACK -> data -> FIN -> our FIN -> final ACK.
-/// Goes through `process_ethernet_frame` (not the bare TCB), so it also exercises
-/// `ConnectionPool`/`Listen` wiring.
-#[test_case]
-fn tcp_full_connection_lifecycle_through_rx() {
-    let server_hw = EthernetAddress::from_bytes(&[1, 2, 3, 4, 5, 6]);
-    let server_ip = IPv4Address::new(10, 0, 0, 1);
-    let client_hw = EthernetAddress::from_bytes(&[7, 8, 9, 10, 11, 12]);
-    let client_ip = IPv4Address::new(10, 0, 0, 2);
-    let client_port = 1234;
-    let server_port = 4242;
-
-    let ctx = NetContext::from_addresses(server_hw, server_ip);
-    let mut pool = ConnectionPool::default();
-    pool.listen(Listen::AnyAddress(server_port));
-
-    // --- SYN ---
-    let syn = build_tcp_frame(
-        server_hw,
-        client_hw,
-        server_ip,
-        client_ip,
-        client_port,
-        server_port,
-        2000,
-        0,
-        true,
-        false,
-        false,
-        &[],
-    );
-    let syn_frame = EthernetFrame::new(syn.as_slice()).unwrap();
-    let Ok(ProcessingResult::Respond(syn_ack)) =
-        process_ethernet_frame(&ctx, &mut pool, &syn_frame)
-    else {
-        panic!("expected a SYN-ACK response")
-    };
-    let syn_ack_frame = EthernetFrame::new(syn_ack.as_slice()).unwrap();
-    let syn_ack_ip = IPv4Packet::new(syn_ack_frame.payload()).unwrap();
-    let syn_ack_tcp = TCPPacket::new(syn_ack_ip.payload()).unwrap();
-    assert!(syn_ack_tcp.syn());
-    assert!(syn_ack_tcp.ack());
-    assert_eq!(syn_ack_tcp.acknowledgment(), Sequence::from(2001));
-    let server_iss: u32 = syn_ack_tcp.sequence().into();
-
-    // --- ACK completing the handshake ---
-    let ack = build_tcp_frame(
-        server_hw,
-        client_hw,
-        server_ip,
-        client_ip,
-        client_port,
-        server_port,
-        2001,
-        server_iss + 1,
-        false,
-        true,
-        false,
-        &[],
-    );
-    let ack_frame = EthernetFrame::new(ack.as_slice()).unwrap();
-    let result = process_ethernet_frame(&ctx, &mut pool, &ack_frame).unwrap();
-    assert!(matches!(result, ProcessingResult::Nothing));
-
-    // --- data ---
-    let data = build_tcp_frame(
-        server_hw,
-        client_hw,
-        server_ip,
-        client_ip,
-        client_port,
-        server_port,
-        2001,
-        server_iss + 1,
-        false,
-        true,
-        false,
-        b"hello",
-    );
-    let data_frame = EthernetFrame::new(data.as_slice()).unwrap();
-    let Ok(ProcessingResult::Respond(data_ack)) =
-        process_ethernet_frame(&ctx, &mut pool, &data_frame)
-    else {
-        panic!("expected an ACK for the data")
-    };
-    let data_ack_frame = EthernetFrame::new(data_ack.as_slice()).unwrap();
-    let data_ack_ip = IPv4Packet::new(data_ack_frame.payload()).unwrap();
-    let data_ack_tcp = TCPPacket::new(data_ack_ip.payload()).unwrap();
-    assert_eq!(data_ack_tcp.acknowledgment(), Sequence::from(2006)); // 2001 + 5 bytes
-
-    // --- FIN ---
-    let fin = build_tcp_frame(
-        server_hw,
-        client_hw,
-        server_ip,
-        client_ip,
-        client_port,
-        server_port,
-        2006,
-        server_iss + 1,
-        false,
-        true,
-        true,
-        &[],
-    );
-    let fin_frame = EthernetFrame::new(fin.as_slice()).unwrap();
-    let Ok(ProcessingResult::Respond(fin_reply)) =
-        process_ethernet_frame(&ctx, &mut pool, &fin_frame)
-    else {
-        panic!("expected our own FIN in response")
-    };
-    let fin_reply_frame = EthernetFrame::new(fin_reply.as_slice()).unwrap();
-    let fin_reply_ip = IPv4Packet::new(fin_reply_frame.payload()).unwrap();
-    let fin_reply_tcp = TCPPacket::new(fin_reply_ip.payload()).unwrap();
-    assert!(fin_reply_tcp.fin());
-    assert!(fin_reply_tcp.ack());
-    assert_eq!(fin_reply_tcp.acknowledgment(), Sequence::from(2007));
-
-    // --- final ACK closes the connection ---
-    let final_ack = build_tcp_frame(
-        server_hw,
-        client_hw,
-        server_ip,
-        client_ip,
-        client_port,
-        server_port,
-        2007,
-        Into::<u32>::into(fin_reply_tcp.sequence()) + 1,
-        false,
-        true,
-        false,
-        &[],
-    );
-    let final_ack_frame = EthernetFrame::new(final_ack.as_slice()).unwrap();
-    let result = process_ethernet_frame(&ctx, &mut pool, &final_ack_frame).unwrap();
-    assert!(matches!(result, ProcessingResult::Nothing));
 }

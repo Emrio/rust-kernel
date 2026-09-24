@@ -11,7 +11,6 @@ use core::panic::PanicInfo;
 use rust_kernel::executor::block_on;
 use rust_kernel::memory::init_memory;
 use rust_kernel::net;
-use rust_kernel::net::socket::listen::Listen;
 use rust_kernel::time::init_time;
 use rust_kernel::{hlt_loop, init};
 use rust_kernel::{keyboard, klog, serial};
@@ -28,17 +27,14 @@ fn kmain(boot_info: &'static BootInfo) -> ! {
     #[cfg(test)]
     test_main();
 
-    let mut state_machine = rust_kernel::net::STATE_MACHINE.lock();
-    state_machine.tcp_pool().listen(Listen::AnyAddress(4242));
-    drop(state_machine);
-
     rust_kernel::drivers::i82540em::find_and_setup_ethernet_controller();
     block_on(join!(
         net::rx_loop(),
         net::net_loop(),
         keyboard::print_keypresses(),
         serial::print_keypresses(),
-        net::pong::udp_pong_server(4242)
+        net::pong::udp_pong_server(4242),
+        net::pong::tcp_pong_server(4242),
     ));
 
     hlt_loop()

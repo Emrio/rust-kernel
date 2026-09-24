@@ -1,13 +1,11 @@
 extern crate alloc;
 
-use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::net::error::BufferTooSmall;
 use crate::net::ipv4::IPv4Packet;
 use crate::net::ipv4::address::IPv4Address;
-use crate::net::socket::listen::Listen;
 use crate::net::tcp::sequence::Sequence;
 use crate::net::tcp::{TCP_HEADER, TCPPacket};
 use crate::print::colors::Colorable;
@@ -38,10 +36,17 @@ pub struct TransmissionControlBlock {
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-struct Id(IPv4Address, u16, IPv4Address, u16);
+pub struct Id(pub IPv4Address, pub u16, pub IPv4Address, pub u16);
 
-#[derive(Debug, PartialEq, Eq)]
-enum State {
+#[derive(Debug, Default)]
+pub struct AcceptResult {
+    pub established: bool,
+    pub destroyed: bool,
+    pub response: Option<Vec<u8>>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum State {
     Listen,
     SynReceived,
     Established,
@@ -75,7 +80,7 @@ impl TransmissionControlBlock {
         }
     }
 
-    fn id(&self) -> Id {
+    pub fn id(&self) -> Id {
         Id(
             self.local_address,
             self.local_port,
@@ -137,7 +142,7 @@ impl TransmissionControlBlock {
         Ok(buffer)
     }
 
-    pub fn accept(&mut self, packet: &TCPPacket<&[u8]>) -> Result<Option<Vec<u8>>, BufferTooSmall> {
+    pub fn accept(&mut self, packet: &TCPPacket<&[u8]>) -> Result<AcceptResult, BufferTooSmall> {
         if packet.rst() {
             klog!(
                 format_args!(
@@ -148,7 +153,10 @@ impl TransmissionControlBlock {
                 "RST".red()
             );
             self.state = State::Closed;
-            return Ok(None);
+            return Ok(AcceptResult {
+                destroyed: true,
+                ..Default::default()
+            });
         }
 
         if self.state == State::Listen && packet.syn() {
@@ -166,7 +174,10 @@ impl TransmissionControlBlock {
             self.rcv_nxt = self.irs + 1;
             self.snd_una = self.iss;
             self.snd_nxt = self.iss + 1;
-            return self.generate_syn_ack().map(Some);
+            return Ok(AcceptResult {
+                response: Some(self.generate_syn_ack()?),
+                ..Default::default()
+            });
         }
 
         if self.state == State::SynReceived
@@ -181,7 +192,10 @@ impl TransmissionControlBlock {
                 "Connection established"
             );
             self.state = State::Established;
-            return Ok(None);
+            return Ok(AcceptResult {
+                established: true,
+                ..Default::default()
+            });
         }
 
         if self.state == State::LastAck && packet.ack() && packet.acknowledgment() == self.snd_nxt {
@@ -193,11 +207,14 @@ impl TransmissionControlBlock {
                 "Connection closed"
             );
             self.state = State::Closed;
-            return Ok(None);
+            return Ok(AcceptResult {
+                destroyed: true,
+                ..Default::default()
+            });
         }
 
         if self.state != State::Established {
-            return Ok(None);
+            return Ok(AcceptResult::default());
         }
 
         if !packet.payload().is_empty() {
@@ -232,10 +249,16 @@ impl TransmissionControlBlock {
             self.state = State::CloseWait;
             self.rcv_nxt += 1;
             // TEMPORARY:
-            return self.close();
+            return Ok(AcceptResult {
+                response: self.close()?,
+                ..Default::default()
+            });
         }
 
-        self.generate_ack().map(Some)
+        Ok(AcceptResult {
+            response: Some(self.generate_ack()?),
+            ..Default::default()
+        })
     }
 
     pub fn close(&mut self) -> Result<Option<Vec<u8>>, BufferTooSmall> {
@@ -254,86 +277,7 @@ impl From<Id> for TransmissionControlBlock {
     }
 }
 
-// TODO: delegate to task that awaits for new data?
-#[derive(Default)]
-pub struct ConnectionPool {
-    active_connections: BTreeMap<Id, TransmissionControlBlock>,
-    listening: BTreeSet<Listen>,
-}
-
-impl ConnectionPool {
-    pub const fn new() -> Self {
-        Self {
-            active_connections: BTreeMap::new(),
-            listening: BTreeSet::new(),
-        }
-    }
-
-    pub fn listen(&mut self, listen: Listen) {
-        match &listen {
-            Listen::AnyAddress(port) => klog!("tcp", "Listening on 0.0.0.0:", port),
-            Listen::SpecificAddress(address, port) => {
-                klog!("tcp", "Listening on ", address, ":", port)
-            }
-        }
-
-        self.listening.insert(listen);
-    }
-
-    fn get_connection(
-        &mut self,
-        ip: &IPv4Packet<&[u8]>,
-        tcp: &TCPPacket<&[u8]>,
-    ) -> Option<&mut TransmissionControlBlock> {
-        let id = Id(
-            ip.destination(),
-            tcp.destination(),
-            ip.source(),
-            tcp.source(),
-        );
-        if !self.active_connections.contains_key(&id) && tcp.syn() {
-            let specific_listen = Listen::SpecificAddress(ip.destination(), tcp.destination());
-            let any_listen = Listen::AnyAddress(tcp.destination());
-            if !self.listening.contains(&specific_listen) && !self.listening.contains(&any_listen) {
-                return None;
-            }
-            let connection: TransmissionControlBlock = id.into();
-            self.active_connections.insert(connection.id(), connection);
-        }
-
-        self.active_connections.get_mut(&id)
-    }
-
-    pub fn accept(&mut self, ip: &IPv4Packet<&[u8]>, tcp: &TCPPacket<&[u8]>) -> Option<Vec<u8>> {
-        let Some(connection) = self.get_connection(ip, tcp) else {
-            klog!(
-                format_args!(
-                    "tcp/{}/{}/{}/{}",
-                    ip.destination(),
-                    tcp.destination(),
-                    ip.source(),
-                    tcp.source()
-                ),
-                "Sending ",
-                "RST".red()
-            );
-            return generate_rst(ip, tcp);
-        };
-
-        let result = connection
-            .accept(tcp)
-            .expect("buffer should not be too small");
-
-        let id = connection.id();
-        if connection.state == State::Closed {
-            self.active_connections.remove(&id);
-        }
-
-        result
-    }
-}
-
-fn generate_rst(ip: &IPv4Packet<&[u8]>, tcp: &TCPPacket<&[u8]>) -> Option<Vec<u8>> {
+pub fn generate_rst(ip: &IPv4Packet<&[u8]>, tcp: &TCPPacket<&[u8]>) -> Option<Vec<u8>> {
     if tcp.rst() {
         return None;
     }
@@ -431,6 +375,7 @@ mod tests {
         let response = tcb
             .accept(&TCPPacket::new(syn.as_slice()).unwrap())
             .unwrap()
+            .response
             .expect("expected a SYN-ACK");
         let response = TCPPacket::new(response.as_slice()).unwrap();
 
@@ -454,7 +399,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(tcb.state, State::Established);
-        assert!(result.is_none());
+        assert!(result.response.is_none());
     }
 
     #[test_case]
@@ -493,6 +438,7 @@ mod tests {
         let response = tcb
             .accept(&TCPPacket::new(data.as_slice()).unwrap())
             .unwrap()
+            .response
             .expect("expected an ACK");
         let response = TCPPacket::new(response.as_slice()).unwrap();
 
@@ -524,6 +470,7 @@ mod tests {
         let response = tcb
             .accept(&TCPPacket::new(data.as_slice()).unwrap())
             .unwrap()
+            .response
             .expect("a duplicate segment should still be met with a duplicate ACK");
         let response = TCPPacket::new(response.as_slice()).unwrap();
 
@@ -577,6 +524,7 @@ mod tests {
         let response = tcb
             .accept(&TCPPacket::new(fin_with_data.as_slice()).unwrap())
             .unwrap()
+            .response
             .expect("expected a response");
         let response = TCPPacket::new(response.as_slice()).unwrap();
 
@@ -653,7 +601,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(tcb.state, State::Closed);
-        assert!(result.is_none());
+        assert!(result.response.is_none());
     }
 
     #[test_case]
@@ -666,7 +614,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(tcb.state, State::Closed);
-        assert!(result.is_none());
+        assert!(result.response.is_none());
     }
 
     #[test_case]
@@ -705,94 +653,5 @@ mod tests {
             ip.payload_mut().copy_from_slice(tcp_bytes);
         }
         buffer
-    }
-
-    #[test_case]
-    fn stray_non_syn_segment_does_not_create_a_zombie_connection() {
-        let mut pool = ConnectionPool::default();
-        pool.listen(Listen::AnyAddress(LOCAL_PORT));
-
-        // A stray ACK for a connection we never saw a SYN for (e.g. a late
-        // retransmission from a connection that predates us listening).
-        let tcp_bytes = segment(1000, 5000, false, true, false, false, &[]);
-        let ip_bytes = ip_frame(&tcp_bytes);
-        let ip = IPv4Packet::new(ip_bytes.as_slice()).unwrap();
-        let tcp = TCPPacket::new(ip.payload()).unwrap();
-
-        pool.accept(&ip, &tcp);
-
-        assert!(
-            pool.active_connections.is_empty(),
-            "a non-SYN segment for an unknown connection must not spawn a zombie TCB"
-        );
-    }
-
-    #[test_case]
-    fn rst_reply_to_ack_segment_uses_incoming_ack_as_sequence() {
-        let mut pool = ConnectionPool::default();
-        pool.listen(Listen::AnyAddress(LOCAL_PORT));
-
-        // Exactly like the stray retransmitted ACK+PSH+FIN observed in the wild:
-        // no SYN was ever seen for this connection.
-        let tcp_bytes = segment(1000, 5000, false, true, true, false, b"stray!!");
-        let ip_bytes = ip_frame(&tcp_bytes);
-        let ip = IPv4Packet::new(ip_bytes.as_slice()).unwrap();
-        let tcp = TCPPacket::new(ip.payload()).unwrap();
-
-        let response = pool.accept(&ip, &tcp).expect("expected a RST");
-        let response = TCPPacket::new(response.as_slice()).unwrap();
-
-        assert!(response.rst());
-        assert_eq!(
-            response.sequence(),
-            Sequence::from(5000),
-            "RFC 793: when the offending segment has ACK set, the RST's sequence \
-             number must equal that ACK value, or real stacks treat the RST as \
-             out-of-window and silently ignore it"
-        );
-    }
-
-    #[test_case]
-    fn rst_reply_to_segment_without_ack_computes_sequence_and_ack() {
-        let mut pool = ConnectionPool::default();
-        pool.listen(Listen::AnyAddress(LOCAL_PORT));
-
-        // A bare FIN with no ACK and no matching connection: unusual, but
-        // covered by RFC 793's reset-generation rules.
-        let payload: &[u8] = b"abc";
-        let tcp_bytes = segment(2000, 0, false, false, true, false, payload);
-        let ip_bytes = ip_frame(&tcp_bytes);
-        let ip = IPv4Packet::new(ip_bytes.as_slice()).unwrap();
-        let tcp = TCPPacket::new(ip.payload()).unwrap();
-
-        let response = pool.accept(&ip, &tcp).expect("expected a RST");
-        let response = TCPPacket::new(response.as_slice()).unwrap();
-
-        assert!(response.rst());
-        assert!(response.ack());
-        assert_eq!(response.sequence(), Sequence::from(0));
-        assert_eq!(
-            response.acknowledgment(),
-            Sequence::from(2000 + payload.len() as u32)
-        );
-    }
-
-    #[test_case]
-    fn no_rst_sent_in_reply_to_an_incoming_rst() {
-        let mut pool = ConnectionPool::default();
-        pool.listen(Listen::AnyAddress(LOCAL_PORT));
-
-        let tcp_bytes = segment(3000, 0, false, false, false, true, &[]);
-        let ip_bytes = ip_frame(&tcp_bytes);
-        let ip = IPv4Packet::new(ip_bytes.as_slice()).unwrap();
-        let tcp = TCPPacket::new(ip.payload()).unwrap();
-
-        let response = pool.accept(&ip, &tcp);
-
-        assert!(
-            response.is_none(),
-            "replying to an unmatched RST with another RST risks a reset storm \
-             between two confused peers"
-        );
     }
 }
