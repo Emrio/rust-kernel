@@ -53,7 +53,7 @@ pub fn generate_echo_reply(
         destination: request_frame.source(),
         ethertype: EtherType::IPv4,
         next: L3::IPv4 {
-            source: ctx.ipv4_address().unwrap_or(request_ipv4.destination()),
+            source: request_ipv4.destination(),
             destination: request_ipv4.source(),
             protocol: Protocol::ICMP,
             next: L4::IcmpEcho {
@@ -185,7 +185,7 @@ pub fn generate_ipv4(
         destination: request_frame.source(),
         ethertype: EtherType::IPv4,
         next: L3::IPv4 {
-            source: ctx.ipv4_address().unwrap_or(request_ipv4.destination()),
+            source: request_ipv4.destination(),
             destination: request_ipv4.source(),
             protocol,
             next: L4::Buffer(payload),
