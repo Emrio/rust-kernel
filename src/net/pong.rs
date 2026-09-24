@@ -37,18 +37,23 @@ pub async fn udp_pong_server(port: u16) -> () {
 pub async fn tcp_pong_server(port: u16) -> () {
     let socket = TCPSocket::listen(port);
 
-    let connection = socket.accept().await;
-    klog!(
-        "tcp_pong_server",
-        "Connected to ",
-        connection.remote_address().green(),
-        ":",
-        connection.remote_port().blue(),
-        "!"
-    );
-
     loop {
-        let message = connection.receive().await;
-        kprintln!("-> {:02x?}", message);
+        let connection = socket.accept().await;
+        klog!(
+            "tcp_pong_server",
+            "Connected to ",
+            connection.remote_address().green(),
+            ":",
+            connection.remote_port().blue(),
+            "!"
+        );
+
+        loop {
+            let Ok(message) = connection.receive().await else {
+                break;
+            };
+
+            kprintln!("-> {}", alloc::string::String::from_utf8_lossy(&message));
+        }
     }
 }

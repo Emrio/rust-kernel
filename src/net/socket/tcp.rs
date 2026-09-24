@@ -4,6 +4,8 @@ use alloc::collections::BTreeMap;
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use core::sync::atomic::AtomicBool;
+use core::sync::atomic::Ordering;
 use core::task::Poll;
 use futures_util::task::AtomicWaker;
 
@@ -79,6 +81,7 @@ impl Drop for BoundSocket {
 struct ByteStream {
     buffer: spin::Mutex<VecDeque<u8>>,
     waker: AtomicWaker,
+    closed: AtomicBool,
 }
 
 pub struct Connection {
@@ -90,24 +93,34 @@ pub struct Receive {
     stream: Arc<ByteStream>,
 }
 
+pub struct ConnectionClosed;
+
 impl Future for Receive {
-    type Output = Vec<u8>;
+    type Output = Result<Vec<u8>, ConnectionClosed>;
 
     fn poll(
         self: core::pin::Pin<&mut Self>,
         cx: &mut core::task::Context<'_>,
     ) -> Poll<Self::Output> {
+        if self.stream.closed.load(Ordering::Acquire) {
+            Err(ConnectionClosed)?
+        }
+
         let mut buffer = self.stream.buffer.lock();
         if !buffer.is_empty() {
-            return Poll::Ready(buffer.drain(..).collect());
+            return Poll::Ready(Ok(buffer.drain(..).collect()));
         }
         drop(buffer);
 
         self.stream.waker.register(cx.waker());
 
+        if self.stream.closed.load(Ordering::Acquire) {
+            Err(ConnectionClosed)?
+        }
+
         let mut buffer = self.stream.buffer.lock();
         if !buffer.is_empty() {
-            return Poll::Ready(buffer.drain(..).collect());
+            return Poll::Ready(Ok(buffer.drain(..).collect()));
         }
         Poll::Pending
     }
@@ -120,6 +133,7 @@ impl Connection {
             stream: Arc::new(ByteStream {
                 buffer: spin::Mutex::new(VecDeque::with_capacity(4096)),
                 waker: AtomicWaker::new(),
+                closed: AtomicBool::new(false),
             }),
         }
     }
@@ -228,6 +242,15 @@ impl ConnectionPool {
             return None;
         };
 
+        if result.destroyed {
+            if let ConnectionStatus::Established(_, stream) = connection {
+                stream.closed.store(true, Ordering::Release);
+                stream.waker.wake();
+            }
+
+            return result.response;
+        }
+
         let new_connection = match connection {
             ConnectionStatus::HalfOpen(tcb, handle) if result.established => {
                 let connection = Connection::new(id);
@@ -250,10 +273,6 @@ impl ConnectionPool {
         };
 
         self.connections.insert(id, new_connection);
-
-        if result.destroyed {
-            self.connections.remove(&id);
-        }
 
         result.response
     }
