@@ -31,6 +31,7 @@ mod tests;
 
 pub use rx::rx_loop;
 
+#[derive(Clone, Copy)]
 pub struct DHCPConfiguration {
     invalid_at: Instant,
     ipv4: IPv4Address,
@@ -41,7 +42,7 @@ pub struct DHCPConfiguration {
 
 enum DHCPStateMachine {
     Unconfigured(Instant),
-    Offered(Instant),
+    Offered(Instant, Instant, u32, DHCPConfiguration),
     Assigned(DHCPConfiguration),
 }
 
@@ -91,8 +92,21 @@ async fn net_loop_logic() {
             device.send_packet(&buffer);
         }
 
-        DHCPStateMachine::Offered(offered_time)
-            if offered_time.from_now() > Duration::from_secs(3) =>
+        DHCPStateMachine::Offered(offered_time, last_retry, xid, configuration)
+            if last_retry.from_now() > Duration::from_secs(2) =>
+        {
+            let context = rx::NetContext::from_device_and_state(device, &state_machine);
+            let buffer =
+                tx::generate_dhcp_request_with_configuration(&context, xid, &configuration)
+                    .expect("buffer too small");
+            klog!("dhcp", "Re-requesting offer");
+            device.send_packet(&buffer);
+            state_machine.dhcp =
+                DHCPStateMachine::Offered(offered_time, Instant::now(), xid, configuration);
+        }
+
+        DHCPStateMachine::Offered(offered_time, _, _, _)
+            if offered_time.from_now() > Duration::from_secs(9) =>
         {
             // DHCP offer was not met with ack, retrying...
             state_machine.dhcp = DHCPStateMachine::Unconfigured(Instant::now());
@@ -119,6 +133,6 @@ async fn net_loop_logic() {
 pub async fn net_loop() {
     loop {
         net_loop_logic().await;
-        sleep(Duration::from_secs(1)).await;
+        sleep(Duration::from_millis(200)).await;
     }
 }

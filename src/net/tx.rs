@@ -3,6 +3,7 @@ extern crate alloc;
 use alloc::vec;
 use alloc::vec::Vec;
 
+use crate::net::DHCPConfiguration;
 use crate::net::arp::{ARP_PACKET, ARPOperation, ARPPacket, HardwareType, ProtocolType};
 use crate::net::dhcp::option::DHCPOption;
 use crate::net::dhcp::{self, DHCP_HEADER, DHCPPacket};
@@ -126,6 +127,43 @@ pub fn generate_dhcp_request(
                 next: L7::Dhcp {
                     operation: dhcp::operation::Operation::BootRequest,
                     xid: dhcp_offer.xid(),
+                    hardware_address: ctx.hardware_address(),
+                    options,
+                },
+            },
+        },
+    })
+}
+
+pub fn generate_dhcp_request_with_configuration(
+    ctx: &NetContext,
+    xid: u32,
+    configuration: &DHCPConfiguration,
+) -> Result<Vec<u8>, BufferTooSmall> {
+    let mut options = vec![
+        DHCPOption::MessageType(dhcp::option::MessageType::Request),
+        DHCPOption::RequestedAddress(configuration.ipv4),
+        DHCPOption::Hostname("RustKernel".into()),
+    ];
+    // if let Some(id) = dhcp_offer.options().get_server_identifier() {
+    //     options.push(DHCPOption::ServerIdentifier(id));
+    // }
+    options.push(DHCPOption::End);
+
+    build(L2::Ethernet {
+        source: ctx.hardware_address(),
+        destination: EthernetAddress::BROADCAST,
+        ethertype: EtherType::IPv4,
+        next: L3::IPv4 {
+            source: IPv4Address::default(),
+            destination: IPv4Address::BROADCAST,
+            protocol: Protocol::UDP,
+            next: L4::Udp {
+                source: dhcp::ports::CLIENT,
+                destination: dhcp::ports::SERVER,
+                next: L7::Dhcp {
+                    operation: dhcp::operation::Operation::BootRequest,
+                    xid,
                     hardware_address: ctx.hardware_address(),
                     options,
                 },

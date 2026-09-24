@@ -69,7 +69,7 @@ impl NetContext {
 pub enum ProcessingResult {
     Nothing,
     DHCPReset,
-    DHCPOffered(Vec<u8>),
+    DHCPOffered(Vec<u8>, u32, DHCPConfiguration),
     DHCPAccepted(DHCPConfiguration),
     PushUdpMessage(UDPMessage),
     Respond(Vec<u8>),
@@ -180,27 +180,34 @@ pub fn process_ethernet_frame(
 
                         let message_type = dhcp.options().get_message_type();
 
+                        if dhcp.your_address().is_broadcast() || dhcp.your_address().is_zero() {
+                            return Ok(ProcessingResult::DHCPReset);
+                        }
+
+                        let Some(invalid_at) = dhcp
+                            .options()
+                            .get_lease_time()
+                            .map(|lease_time| Instant::now() + lease_time)
+                        else {
+                            return Ok(ProcessingResult::DHCPReset);
+                        };
+                        let configuration = DHCPConfiguration {
+                            invalid_at,
+                            ipv4: dhcp.your_address(),
+                            netmask: dhcp.options().get_mask(),
+                            router: dhcp.options().get_router(),
+                            dns: dhcp.options().get_dns(),
+                        };
+
                         return match message_type {
                             Some(dhcp::option::MessageType::Offer) => {
-                                Ok(ProcessingResult::DHCPOffered(tx::generate_dhcp_request(
-                                    ctx, &dhcp,
-                                )?))
+                                Ok(ProcessingResult::DHCPOffered(
+                                    tx::generate_dhcp_request(ctx, &dhcp)?,
+                                    dhcp.xid(),
+                                    configuration,
+                                ))
                             }
                             Some(dhcp::option::MessageType::Ack) => {
-                                let Some(invalid_at) = dhcp
-                                    .options()
-                                    .get_lease_time()
-                                    .map(|lease_time| Instant::now() + lease_time)
-                                else {
-                                    return Ok(ProcessingResult::DHCPReset);
-                                };
-
-                                if dhcp.your_address().is_broadcast()
-                                    || dhcp.your_address().is_zero()
-                                {
-                                    return Ok(ProcessingResult::DHCPReset);
-                                }
-
                                 Ok(ProcessingResult::DHCPAccepted(DHCPConfiguration {
                                     invalid_at,
                                     ipv4: dhcp.your_address(),
@@ -242,9 +249,10 @@ pub fn handle_incoming_ethernet_packet(buffer: &[u8]) {
         Ok(ProcessingResult::DHCPReset) => {
             state.dhcp = DHCPStateMachine::Unconfigured(Instant::now())
         }
-        Ok(ProcessingResult::DHCPOffered(buffer)) => {
+        Ok(ProcessingResult::DHCPOffered(buffer, xid, configuration)) => {
             device.send_packet(&buffer);
-            state.dhcp = DHCPStateMachine::Offered(Instant::now());
+            state.dhcp =
+                DHCPStateMachine::Offered(Instant::now(), Instant::now(), xid, configuration);
         }
         Ok(ProcessingResult::DHCPAccepted(configuration)) => {
             klog!(
