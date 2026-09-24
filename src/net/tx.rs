@@ -21,6 +21,7 @@ use crate::net::rx::NetContext;
 use crate::net::tcp::sequence::Sequence;
 use crate::net::tcp::{TCP_HEADER, TCPPacket};
 use crate::net::udp::{UDP_HEADER, UDPPacket};
+use crate::random::random_u32;
 
 pub fn generate_arp_reply(
     ctx: &NetContext,
@@ -78,7 +79,7 @@ pub fn generate_dhcp_discover(ctx: &NetContext) -> Result<Vec<u8>, BufferTooSmal
                 destination: dhcp::ports::SERVER,
                 next: L7::Dhcp {
                     operation: dhcp::operation::Operation::BootRequest,
-                    xid: 0x4242, // TODO:
+                    xid: random_u32(),
                     hardware_address: ctx.hardware_address(),
                     options: vec![
                         DHCPOption::MessageType(dhcp::option::MessageType::Discover),

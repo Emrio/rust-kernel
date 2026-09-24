@@ -19,6 +19,7 @@ pub(crate) mod mmio;
 pub mod net;
 pub mod pci;
 pub mod qemu;
+pub mod random;
 pub mod serial;
 pub mod tests;
 pub mod time;
