@@ -82,6 +82,7 @@ struct ByteStream {
 }
 
 pub struct Connection {
+    id: Id,
     stream: Arc<ByteStream>,
 }
 
@@ -113,8 +114,9 @@ impl Future for Receive {
 }
 
 impl Connection {
-    fn new() -> Self {
+    fn new(id: Id) -> Self {
         Self {
+            id,
             stream: Arc::new(ByteStream {
                 buffer: spin::Mutex::new(VecDeque::with_capacity(4096)),
                 waker: AtomicWaker::new(),
@@ -123,11 +125,11 @@ impl Connection {
     }
 
     pub fn remote_address(&self) -> IPv4Address {
-        todo!()
+        self.id.2
     }
 
     pub fn remote_port(&self) -> u16 {
-        todo!()
+        self.id.3
     }
 
     pub fn send(&self, _buffer: &[u8]) {
@@ -228,7 +230,7 @@ impl ConnectionPool {
 
         let new_connection = match connection {
             ConnectionStatus::HalfOpen(tcb, handle) if result.established => {
-                let connection = Connection::new();
+                let connection = Connection::new(id);
                 let stream = connection.stream.clone();
 
                 if handle.queue.push(connection).is_err() {
