@@ -185,3 +185,66 @@ fn get_my_ipv4_address() -> Option<IPv4Address> {
     let context = NetContext::from_device_and_state(device, &state);
     context.ipv4_address()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn message(local_port: u16, payload: &[u8]) -> Message {
+        Message {
+            local_port,
+            remote_address: IPv4Address::new(10, 0, 0, 2),
+            remote_port: 1234,
+            payload: payload.to_vec(),
+        }
+    }
+
+    #[test_case]
+    fn message_is_delivered_to_the_matching_listener() {
+        let mut pool = ListenerPool::default();
+        let handle = Arc::new(Handle::new(4));
+        pool.add(Listen::AnyAddress(4242), handle.clone());
+
+        pool.accept(message(4242, b"hello"));
+
+        let received = handle.queue.pop().expect("expected a queued message");
+        assert_eq!(received.payload(), b"hello");
+        assert_eq!(received.remote_port(), 1234);
+    }
+
+    #[test_case]
+    fn message_for_unknown_port_is_dropped_without_panicking() {
+        let mut pool = ListenerPool::default();
+        let handle = Arc::new(Handle::new(4));
+        pool.add(Listen::AnyAddress(4242), handle);
+
+        // Nobody is listening on 9999 -- must not panic, just silently drop.
+        pool.accept(message(9999, b"nope"));
+    }
+
+    #[test_case]
+    fn removed_listener_no_longer_receives_messages() {
+        let mut pool = ListenerPool::default();
+        let handle = Arc::new(Handle::new(4));
+        pool.add(Listen::AnyAddress(4242), handle.clone());
+        pool.remove(&Listen::AnyAddress(4242));
+
+        pool.accept(message(4242, b"late"));
+
+        assert!(handle.queue.pop().is_none());
+    }
+
+    #[test_case]
+    fn full_queue_drops_the_message_without_panicking() {
+        let mut pool = ListenerPool::default();
+        let handle = Arc::new(Handle::new(1));
+        pool.add(Listen::AnyAddress(4242), handle.clone());
+
+        pool.accept(message(4242, b"first"));
+        pool.accept(message(4242, b"second")); // capacity is 1: must be dropped, not panic
+
+        let received = handle.queue.pop().unwrap();
+        assert_eq!(received.payload(), b"first");
+        assert!(handle.queue.pop().is_none());
+    }
+}

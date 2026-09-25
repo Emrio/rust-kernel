@@ -49,6 +49,7 @@ entry_point!(test_kernel_main);
 fn test_kernel_main(boot_info: &'static BootInfo) -> ! {
     super::init();
     super::memory::init_memory(boot_info.physical_memory_offset, &boot_info.memory_map);
+    super::executor::block_on(super::time::init_time());
     super::test_main();
     super::hlt_loop()
 }

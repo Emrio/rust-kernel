@@ -264,3 +264,118 @@ impl Cache {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::executor::block_on;
+
+    fn me() -> (EthernetAddress, IPv4Address) {
+        (
+            EthernetAddress::from_bytes(&[1, 2, 3, 4, 5, 6]),
+            IPv4Address::new(10, 0, 0, 1),
+        )
+    }
+
+    fn peer() -> (EthernetAddress, IPv4Address) {
+        (
+            EthernetAddress::from_bytes(&[7, 8, 9, 10, 11, 12]),
+            IPv4Address::new(10, 0, 0, 2),
+        )
+    }
+
+    /// Builds a synthetic ARP reply, as if `peer` had answered a request for its address.
+    fn reply_from(peer: (EthernetAddress, IPv4Address), requester: (EthernetAddress, IPv4Address)) -> ARPMessage {
+        ARPMessage {
+            hardware_type: HardwareType::Ethernet,
+            hardware_length: EthernetAddress::SIZE,
+            protocol_type: ProtocolType::IPv4,
+            protocol_length: IPv4Address::SIZE,
+            // A reply always echoes the original requester back as its target.
+            target_protocol_address: requester.1,
+            sender_hardware_address: peer.0,
+            sender_protocol_address: peer.1,
+            operation: ARPOperation::Reply,
+        }
+    }
+
+    #[test_case]
+    fn resolve_start_is_known_for_own_identity() {
+        let mut cache = Cache::new();
+        cache.identity = Some(me());
+
+        let start = cache.resolve_start(me().1).unwrap();
+        assert!(matches!(start, ResolveStart::Known(mac) if mac == me().0));
+    }
+
+    #[test_case]
+    fn resolve_start_is_known_for_a_cached_entry() {
+        let mut cache = Cache::new();
+        cache.identity = Some(me());
+        cache.add_entry(peer().1, peer().0);
+
+        let start = cache.resolve_start(peer().1).unwrap();
+        assert!(matches!(start, ResolveStart::Known(mac) if mac == peer().0));
+    }
+
+    #[test_case]
+    fn resolve_start_errors_without_identity_configured() {
+        let mut cache = Cache::new();
+
+        let result = cache.resolve_start(peer().1);
+        assert!(matches!(result, Err(ResolutionError::UnconfiguredIdentity)));
+    }
+
+    #[test_case]
+    fn resolve_start_registers_a_pending_request() {
+        let mut cache = Cache::new();
+        cache.identity = Some(me());
+
+        let start = cache.resolve_start(peer().1).unwrap();
+        assert!(matches!(start, ResolveStart::Pending(_)));
+        assert!(cache.requests.contains_key(&peer().1));
+    }
+
+    #[test_case]
+    fn accept_reply_resolves_the_matching_pending_request() {
+        let mut cache = Cache::new();
+        cache.identity = Some(me());
+
+        let start = cache.resolve_start(peer().1).unwrap();
+        let ResolveStart::Pending(resolution) = start else {
+            panic!("expected a pending resolution")
+        };
+
+        block_on(cache.accept(reply_from(peer(), me())));
+
+        let resolved = block_on(resolution).expect("expected the resolution to succeed");
+        assert_eq!(
+            resolved,
+            peer().0,
+            "must resolve to the *peer's* MAC, not our own echoed back"
+        );
+    }
+
+    #[test_case]
+    fn accept_reply_for_an_unrequested_address_is_ignored() {
+        let mut cache = Cache::new();
+        cache.identity = Some(me());
+
+        // No resolve_start() was ever called for `peer` -- nothing pending for it.
+        block_on(cache.accept(reply_from(peer(), me())));
+
+        assert!(cache.get_cache(peer().1).is_none());
+    }
+
+    #[test_case]
+    fn resolve_finish_caches_the_entry_and_clears_the_pending_request() {
+        let mut cache = Cache::new();
+        cache.identity = Some(me());
+        cache.resolve_start(peer().1).unwrap();
+
+        cache.resolve_finish(peer().1, peer().0);
+
+        assert!(!cache.requests.contains_key(&peer().1));
+        assert_eq!(cache.get_cache(peer().1), Some(peer().0));
+    }
+}
