@@ -46,28 +46,48 @@ fn icmp_echo_request_is_met_with_reply() {
         panic!("Expected response")
     };
 
-    let response = EthernetFrame::new(response).expect("valid ethernet frame");
+    // `Respond` now carries an `L3` descriptor -- the actual Ethernet framing
+    // (and MAC resolution) happens later, in `send_l3`, not here anymore.
+    let L3::IPv4 {
+        source,
+        destination,
+        protocol,
+        next,
+    } = response
+    else {
+        panic!("expected an IPv4 response")
+    };
+    assert_eq!(source, IPv4Address::new(192, 168, 0, 5));
+    assert_eq!(destination, IPv4Address::new(192, 168, 0, 19));
+    assert_eq!(protocol, Protocol::ICMP);
 
-    assert_eq!(response.source(), frame.destination());
-    assert_eq!(response.destination(), frame.source());
-    assert_eq!(
-        response.into_inner(),
-        [
-            0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, // ethernet destination
-            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, // ethernet source
-            0x08, 0x00, // ipv4
-            0x45, 0x00, 0x00, 0x1c, 0x00, 0x00, 0x00, 0x00, 0xff, // ipv4 headers
-            0x01, // protocol: icmp
-            0x3a, 0x78, // ip checksum
-            0xc0, 0xa8, 0x00, 0x05, // source
-            0xc0, 0xa8, 0x00, 0x13, // destination
-            0x00, 0x00, 0xab, 0x89, 0x42, 0x42, 0x12, 0x34 // icmp
-        ]
-    );
+    let L4::IcmpEcho {
+        code,
+        icmp_type,
+        next,
+    } = next
+    else {
+        panic!("expected an ICMP echo reply")
+    };
+    assert_eq!(code, 0);
+    assert_eq!(icmp_type, IcmpType::EchoReply);
+
+    let L7::Buffer(payload) = next else {
+        panic!("expected a raw buffer payload")
+    };
+    // ICMP's "payload" (byte 4 onward) includes the echo identifier/sequence
+    // fields themselves, not just app-level data beyond them.
+    assert_eq!(payload, [0x42, 0x42, 0x12, 0x34]);
 }
 
+/// The actual ARP semantics (answering a request for a known address,
+/// resolving a pending request from a reply, ignoring unrelated ones...) are
+/// covered by `arp::cache::tests`, against the `Cache` directly. Answering a
+/// request for real goes through `Cache::accept` -> `tx::send_l3`, which needs
+/// a live `DEVICE` -- not available in this test harness. This test only
+/// checks that an incoming ARP frame is routed to the cache at all.
 #[test_case]
-fn arp_request_for_me_is_met_with_reply() {
+fn arp_request_is_dispatched_for_processing() {
     let target_hw = EthernetAddress::from_bytes(&[7, 8, 9, 10, 11, 12]);
     let target_ip = IPv4Address::new(10, 0, 2, 3);
     let sender_hw = EthernetAddress::from_bytes(&[1, 2, 3, 4, 5, 6]);
@@ -92,27 +112,9 @@ fn arp_request_for_me_is_met_with_reply() {
     let frame = EthernetFrame::new(packet.as_slice()).unwrap();
 
     let ctx = NetContext::from_addresses(target_hw, target_ip);
-    let Ok(ProcessingResult::Respond(response)) =
-        process_ethernet_frame(&ctx, &mut TCPConnectionPool::default(), &frame)
-    else {
-        panic!("Expected response")
-    };
+    let result = process_ethernet_frame(&ctx, &mut TCPConnectionPool::default(), &frame).unwrap();
 
-    let response = EthernetFrame::new(response).expect("valid ethernet frame");
-
-    assert_eq!(response.source(), target_hw);
-    assert_eq!(response.destination(), frame.source());
-    let Ok(arp_response) = ARPPacket::new(response.payload()) else {
-        panic!("Expected ARP response")
-    };
-
-    assert_eq!(arp_response.hardware_type(), HardwareType::Ethernet);
-    assert_eq!(arp_response.protocol_type(), ProtocolType::IPv4);
-    assert_eq!(arp_response.operation(), ARPOperation::Reply);
-    assert_eq!(arp_response.sender_hardware_address(), target_hw);
-    assert_eq!(arp_response.sender_protocol_address(), target_ip);
-    assert_eq!(arp_response.target_hardware_address(), sender_hw);
-    assert_eq!(arp_response.target_protocol_address(), sender_ip);
+    assert!(matches!(result, ProcessingResult::PushArpMessage(_)));
 }
 
 #[allow(clippy::too_many_arguments)]

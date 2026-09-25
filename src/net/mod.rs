@@ -2,10 +2,11 @@ use core::time::Duration;
 
 use crate::drivers::i82540em::DEVICE;
 use crate::net::arp::ARPCache;
-use crate::net::device::NetworkDevice;
 use crate::net::ipv4::mask::IPv4Mask;
 use crate::net::socket::TCPConnectionPool;
 use crate::net::socket::UDPListenerPool;
+use crate::net::tx::NetworkError;
+use crate::net::tx::send_l3;
 use crate::time::{Instant, sleep};
 use ipv4::address::IPv4Address;
 
@@ -75,10 +76,10 @@ pub static STATE_MACHINE: spin::Mutex<StateMachine> = spin::Mutex::new(StateMach
     arp: ARPCache::new(),
 });
 
-async fn net_loop_logic() {
+async fn net_loop_logic() -> Result<(), NetworkError> {
     let Some(device) = DEVICE.get() else {
         // network not ready
-        return;
+        return Ok(());
     };
 
     let mut state_machine = STATE_MACHINE.lock();
@@ -91,9 +92,9 @@ async fn net_loop_logic() {
             state_machine.dhcp = DHCPStateMachine::Unconfigured(Instant::now());
 
             let context = rx::NetContext::from_device_and_state(device, &state_machine);
-            let buffer = tx::generate_dhcp_discover(&context).expect("buffer too small");
+            let message = tx::generate_dhcp_discover(&context);
             klog!("dhcp", "Unconfigured: Sending DISCOVER");
-            device.send_packet(&buffer);
+            send_l3(message).await?;
         }
 
         DHCPStateMachine::Offered(offered_time, last_retry, xid, configuration)
@@ -101,10 +102,9 @@ async fn net_loop_logic() {
         {
             let context = rx::NetContext::from_device_and_state(device, &state_machine);
             let buffer =
-                tx::generate_dhcp_request_with_configuration(&context, xid, &configuration)
-                    .expect("buffer too small");
+                tx::generate_dhcp_request_with_configuration(&context, xid, &configuration);
             klog!("dhcp", "Re-requesting offer");
-            device.send_packet(&buffer);
+            send_l3(buffer).await?;
             state_machine.dhcp =
                 DHCPStateMachine::Offered(offered_time, Instant::now(), xid, configuration);
         }
@@ -125,19 +125,23 @@ async fn net_loop_logic() {
             state_machine.arp.identity = None;
 
             let context = rx::NetContext::from_device_and_state(device, &state_machine);
-            let buffer = tx::generate_dhcp_discover(&context).expect("buffer too small");
+            let buffer = tx::generate_dhcp_discover(&context);
             klog!("dhcp", "Assigned: Lease expired, sending DISCOVER");
             klog!("dhcp", "Assigned -> Unconfigured");
-            device.send_packet(&buffer);
+            send_l3(buffer).await?;
         }
 
         _ => {}
     }
+
+    Ok(())
 }
 
 pub async fn net_loop() {
     loop {
-        net_loop_logic().await;
+        if let Err(err) = net_loop_logic().await {
+            kprintln!("Network error: {err:?}");
+        }
         sleep(Duration::from_millis(200)).await;
     }
 }

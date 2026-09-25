@@ -20,7 +20,7 @@ use crate::net::ipv4::address::IPv4Address;
 use crate::net::ipv4::protocol::Protocol;
 use crate::net::socket::{TCPConnectionPool, UDPMessage};
 use crate::net::tcp::TCPPacket;
-use crate::net::tx::{self, generate_echo_reply};
+use crate::net::tx::{self, L3, NetworkError, generate_echo_reply, send_l3};
 use crate::net::udp::UDPPacket;
 use crate::net::{DHCPConfiguration, DHCPStateMachine, STATE_MACHINE, StateMachine, dhcp};
 use crate::print::colors::Colorable;
@@ -68,11 +68,11 @@ impl NetContext {
 pub(crate) enum ProcessingResult {
     Nothing,
     DHCPReset,
-    DHCPOffered(Vec<u8>, u32, DHCPConfiguration),
+    DHCPOffered(L3, u32, DHCPConfiguration),
     DHCPAccepted(DHCPConfiguration),
     PushUdpMessage(UDPMessage),
     PushArpMessage(ARPMessage),
-    Respond(Vec<u8>),
+    Respond(L3),
 }
 
 pub(crate) fn process_ethernet_frame(
@@ -116,9 +116,7 @@ pub(crate) fn process_ethernet_frame(
 
                     if icmp.is_echo_request() {
                         klog!("net_rx", "Echo request, generating response!");
-                        return Ok(ProcessingResult::Respond(generate_echo_reply(
-                            ctx, frame, &ipv4, &icmp,
-                        )?));
+                        return Ok(ProcessingResult::Respond(generate_echo_reply(&ipv4, &icmp)));
                     }
 
                     klog!("net_rx", "ICMP packet is not echo request");
@@ -131,12 +129,10 @@ pub(crate) fn process_ethernet_frame(
 
                     if let Some(response) = tcp_pool.accept(&ipv4, &tcp) {
                         Ok(ProcessingResult::Respond(tx::generate_ipv4(
-                            ctx,
-                            frame,
                             &ipv4,
                             Protocol::TCP,
                             response,
-                        )?))
+                        )))
                     } else {
                         Ok(ProcessingResult::Nothing)
                     }
@@ -177,7 +173,7 @@ pub(crate) fn process_ethernet_frame(
                         return match message_type {
                             Some(dhcp::option::MessageType::Offer) => {
                                 Ok(ProcessingResult::DHCPOffered(
-                                    tx::generate_dhcp_request(ctx, &dhcp)?,
+                                    tx::generate_dhcp_request(ctx, &dhcp),
                                     dhcp.xid(),
                                     configuration,
                                 ))
@@ -203,7 +199,7 @@ pub(crate) fn process_ethernet_frame(
     }
 }
 
-pub async fn handle_incoming_ethernet_packet(buffer: &[u8]) {
+pub async fn handle_incoming_ethernet_packet(buffer: &[u8]) -> Result<(), NetworkError> {
     // kprintln!("-> {:02x?} (size: {})", buffer, buffer.len());
 
     let Ok(frame) = EthernetFrame::new(buffer) else {
@@ -213,7 +209,7 @@ pub async fn handle_incoming_ethernet_packet(buffer: &[u8]) {
             ": Couldn't parse incoming frame of size",
             buffer.len().yellow()
         );
-        return;
+        return Ok(());
     };
 
     let mut state = STATE_MACHINE.lock();
@@ -225,8 +221,8 @@ pub async fn handle_incoming_ethernet_packet(buffer: &[u8]) {
         Ok(ProcessingResult::DHCPReset) => {
             state.dhcp = DHCPStateMachine::Unconfigured(Instant::now())
         }
-        Ok(ProcessingResult::DHCPOffered(buffer, xid, configuration)) => {
-            device.send_packet(&buffer);
+        Ok(ProcessingResult::DHCPOffered(l3, xid, configuration)) => {
+            send_l3(l3).await?;
             state.dhcp =
                 DHCPStateMachine::Offered(Instant::now(), Instant::now(), xid, configuration);
         }
@@ -239,7 +235,7 @@ pub async fn handle_incoming_ethernet_packet(buffer: &[u8]) {
             state.dhcp = DHCPStateMachine::Assigned(configuration);
             state.arp.identity = Some((device.hardware_address(), configuration.ipv4));
         }
-        Ok(ProcessingResult::Respond(buffer)) => device.send_packet(&buffer),
+        Ok(ProcessingResult::Respond(l3)) => send_l3(l3).await?,
         Ok(ProcessingResult::PushUdpMessage(message)) => state.udp.accept(message),
         Ok(ProcessingResult::PushArpMessage(message)) => state.arp.accept(message).await,
         Err(BufferTooSmall) => {
@@ -250,6 +246,7 @@ pub async fn handle_incoming_ethernet_packet(buffer: &[u8]) {
             );
         }
     }
+    Ok(())
 }
 
 struct RxStream;
@@ -280,6 +277,8 @@ pub async fn rx_loop() {
     let mut stream = RxStream;
 
     while let Some(packet) = stream.next().await {
-        handle_incoming_ethernet_packet(&packet).await;
+        if let Err(err) = handle_incoming_ethernet_packet(&packet).await {
+            kprintln!("Network error: {err:?}")
+        }
     }
 }

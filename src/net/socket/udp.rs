@@ -181,9 +181,7 @@ impl ListenerPool {
 
 fn get_my_ipv4_address() -> Option<IPv4Address> {
     let state = STATE_MACHINE.lock();
-    let device = DEVICE.get().expect("device to be ready");
-    let context = NetContext::from_device_and_state(device, &state);
-    context.ipv4_address()
+    state.arp.identity.map(|id| id.1)
 }
 
 #[cfg(test)]

@@ -29,58 +29,46 @@ use crate::net::{DHCPConfiguration, STATE_MACHINE};
 use crate::random::random_u32;
 
 pub fn generate_echo_reply(
-    ctx: &NetContext,
-    request_frame: &EthernetFrame<&[u8]>,
     request_ipv4: &IPv4Packet<&[u8]>,
     request_echo: &ICMPPacket<&[u8]>,
-) -> Result<Vec<u8>, BufferTooSmall> {
-    build(L2::Ethernet {
-        source: ctx.hardware_address(),
-        destination: request_frame.source(),
-        ethertype: EtherType::IPv4,
-        next: L3::IPv4 {
-            source: request_ipv4.destination(),
-            destination: request_ipv4.source(),
-            protocol: Protocol::ICMP,
-            next: L4::IcmpEcho {
-                code: 0,
-                icmp_type: IcmpType::EchoReply,
-                next: L7::Buffer(request_echo.payload().to_vec()),
-            },
+) -> L3 {
+    L3::IPv4 {
+        source: request_ipv4.destination(),
+        destination: request_ipv4.source(),
+        protocol: Protocol::ICMP,
+        next: L4::IcmpEcho {
+            code: 0,
+            icmp_type: IcmpType::EchoReply,
+            next: L7::Buffer(request_echo.payload().to_vec()),
         },
-    })
+    }
 }
 
-pub fn generate_dhcp_discover(ctx: &NetContext) -> Result<Vec<u8>, BufferTooSmall> {
-    build(L2::Ethernet {
-        source: ctx.hardware_address(),
-        destination: EthernetAddress::BROADCAST,
-        ethertype: EtherType::IPv4,
-        next: L3::IPv4 {
-            source: IPv4Address::default(),
-            destination: IPv4Address::BROADCAST,
-            protocol: Protocol::UDP,
-            next: L4::Udp {
-                source: dhcp::ports::CLIENT,
-                destination: dhcp::ports::SERVER,
-                next: L7::Dhcp {
-                    operation: dhcp::operation::Operation::BootRequest,
-                    xid: random_u32(),
-                    hardware_address: ctx.hardware_address(),
-                    options: vec![
-                        DHCPOption::MessageType(dhcp::option::MessageType::Discover),
-                        DHCPOption::ParameterRequestList(vec![
-                            dhcp::option::ParameterRequest::SubnetMask,
-                            dhcp::option::ParameterRequest::Router,
-                            dhcp::option::ParameterRequest::DomainNameServer,
-                        ]),
-                        DHCPOption::Hostname("RustKernel".into()),
-                        DHCPOption::End,
-                    ],
-                },
+pub fn generate_dhcp_discover(ctx: &NetContext) -> L3 {
+    L3::IPv4 {
+        source: IPv4Address::default(),
+        destination: IPv4Address::BROADCAST,
+        protocol: Protocol::UDP,
+        next: L4::Udp {
+            source: dhcp::ports::CLIENT,
+            destination: dhcp::ports::SERVER,
+            next: L7::Dhcp {
+                operation: dhcp::operation::Operation::BootRequest,
+                xid: random_u32(),
+                hardware_address: ctx.hardware_address(),
+                options: vec![
+                    DHCPOption::MessageType(dhcp::option::MessageType::Discover),
+                    DHCPOption::ParameterRequestList(vec![
+                        dhcp::option::ParameterRequest::SubnetMask,
+                        dhcp::option::ParameterRequest::Router,
+                        dhcp::option::ParameterRequest::DomainNameServer,
+                    ]),
+                    DHCPOption::Hostname("RustKernel".into()),
+                    DHCPOption::End,
+                ],
             },
         },
-    })
+    }
 }
 
 pub fn generate_dhcp_request(
@@ -89,7 +77,7 @@ pub fn generate_dhcp_request(
     // request_ipv4: &IPv4Packet<&[u8]>,
     // request_udp: &UDPPacket<&[u8]>,
     dhcp_offer: &DHCPPacket<&[u8]>,
-) -> Result<Vec<u8>, BufferTooSmall> {
+) -> L3 {
     let mut options = vec![
         DHCPOption::MessageType(dhcp::option::MessageType::Request),
         DHCPOption::RequestedAddress(dhcp_offer.your_address()),
@@ -100,33 +88,28 @@ pub fn generate_dhcp_request(
     }
     options.push(DHCPOption::End);
 
-    build(L2::Ethernet {
-        source: ctx.hardware_address(),
-        destination: EthernetAddress::BROADCAST,
-        ethertype: EtherType::IPv4,
-        next: L3::IPv4 {
-            source: IPv4Address::default(),
-            destination: IPv4Address::BROADCAST,
-            protocol: Protocol::UDP,
-            next: L4::Udp {
-                source: dhcp::ports::CLIENT,
-                destination: dhcp::ports::SERVER,
-                next: L7::Dhcp {
-                    operation: dhcp::operation::Operation::BootRequest,
-                    xid: dhcp_offer.xid(),
-                    hardware_address: ctx.hardware_address(),
-                    options,
-                },
+    L3::IPv4 {
+        source: IPv4Address::default(),
+        destination: IPv4Address::BROADCAST,
+        protocol: Protocol::UDP,
+        next: L4::Udp {
+            source: dhcp::ports::CLIENT,
+            destination: dhcp::ports::SERVER,
+            next: L7::Dhcp {
+                operation: dhcp::operation::Operation::BootRequest,
+                xid: dhcp_offer.xid(),
+                hardware_address: ctx.hardware_address(),
+                options,
             },
         },
-    })
+    }
 }
 
 pub fn generate_dhcp_request_with_configuration(
     ctx: &NetContext,
     xid: u32,
     configuration: &DHCPConfiguration,
-) -> Result<Vec<u8>, BufferTooSmall> {
+) -> L3 {
     let mut options = vec![
         DHCPOption::MessageType(dhcp::option::MessageType::Request),
         DHCPOption::RequestedAddress(configuration.ipv4),
@@ -137,46 +120,30 @@ pub fn generate_dhcp_request_with_configuration(
     // }
     options.push(DHCPOption::End);
 
-    build(L2::Ethernet {
-        source: ctx.hardware_address(),
-        destination: EthernetAddress::BROADCAST,
-        ethertype: EtherType::IPv4,
-        next: L3::IPv4 {
-            source: IPv4Address::default(),
-            destination: IPv4Address::BROADCAST,
-            protocol: Protocol::UDP,
-            next: L4::Udp {
-                source: dhcp::ports::CLIENT,
-                destination: dhcp::ports::SERVER,
-                next: L7::Dhcp {
-                    operation: dhcp::operation::Operation::BootRequest,
-                    xid,
-                    hardware_address: ctx.hardware_address(),
-                    options,
-                },
+    L3::IPv4 {
+        source: IPv4Address::default(),
+        destination: IPv4Address::BROADCAST,
+        protocol: Protocol::UDP,
+        next: L4::Udp {
+            source: dhcp::ports::CLIENT,
+            destination: dhcp::ports::SERVER,
+            next: L7::Dhcp {
+                operation: dhcp::operation::Operation::BootRequest,
+                xid,
+                hardware_address: ctx.hardware_address(),
+                options,
             },
         },
-    })
+    }
 }
 
-pub fn generate_ipv4(
-    ctx: &NetContext,
-    request_frame: &EthernetFrame<&[u8]>,
-    request_ipv4: &IPv4Packet<&[u8]>,
-    protocol: Protocol,
-    payload: Vec<u8>,
-) -> Result<Vec<u8>, BufferTooSmall> {
-    build(L2::Ethernet {
-        source: ctx.hardware_address(),
-        destination: request_frame.source(),
-        ethertype: EtherType::IPv4,
-        next: L3::IPv4 {
-            source: request_ipv4.destination(),
-            destination: request_ipv4.source(),
-            protocol,
-            next: L4::Buffer(payload),
-        },
-    })
+pub fn generate_ipv4(request_ipv4: &IPv4Packet<&[u8]>, protocol: Protocol, payload: Vec<u8>) -> L3 {
+    L3::IPv4 {
+        source: request_ipv4.destination(),
+        destination: request_ipv4.source(),
+        protocol,
+        next: L4::Buffer(payload),
+    }
 }
 
 pub(crate) enum L2 {
@@ -502,7 +469,10 @@ pub(super) async fn send_l3(l3: L3) -> Result<(), NetworkError> {
     match &l3 {
         L3::IPv4 { destination, .. } => send_l2(L2::Ethernet {
             source: device.hardware_address(),
-            destination: arp_resolve(*destination).await.map_err(NetworkError::Arp)?,
+            destination: match *destination {
+                IPv4Address::BROADCAST => EthernetAddress::BROADCAST,
+                destination => arp_resolve(destination).await.map_err(NetworkError::Arp)?,
+            },
             ethertype: EtherType::IPv4,
             next: l3,
         }),
