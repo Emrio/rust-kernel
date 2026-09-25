@@ -8,7 +8,7 @@ use futures_util::task::AtomicWaker;
 use futures_util::{Stream, StreamExt};
 
 use crate::drivers::i82540em::DEVICE;
-use crate::net::arp::{ARPMessage, ARPPacket};
+use crate::net::arp::{ARPCache, ARPMessage, ARPPacket};
 use crate::net::device::NetworkDevice;
 use crate::net::dhcp::DHCPPacket;
 use crate::net::error::BufferTooSmall;
@@ -78,6 +78,7 @@ pub(crate) enum ProcessingResult {
 pub(crate) fn process_ethernet_frame(
     ctx: &NetContext,
     tcp_pool: &mut TCPConnectionPool,
+    arp_cache: &mut ARPCache,
     frame: &EthernetFrame<&[u8]>,
 ) -> Result<ProcessingResult, BufferTooSmall> {
     // klog!("net_rx", "Ethernet frame: ", frame);
@@ -99,6 +100,9 @@ pub(crate) fn process_ethernet_frame(
         EtherType::IPv4 => {
             let ipv4 = IPv4Packet::new(frame.payload())?;
             // klog!("net_rx", "IPv4 packet: ", ipv4);
+
+            // TODO: il faut pas ajouter les ip qui ne sont pas dans le netmask
+            arp_cache.add_entry(ipv4.source(), frame.source());
 
             if let Some(ipv4_address) = ctx.ipv4_address()
                 && ipv4_address != ipv4.destination()
@@ -215,14 +219,18 @@ pub async fn handle_incoming_ethernet_packet(buffer: &[u8]) -> Result<(), Networ
     let mut state = STATE_MACHINE.lock();
     let device = DEVICE.get().expect("device to be ready");
     let context = NetContext::from_device_and_state(device, &state);
-    let StateMachine { tcp, .. } = &mut *state;
-    match process_ethernet_frame(&context, tcp, &frame) {
+    let StateMachine { tcp, arp, .. } = &mut *state;
+    let processing_result = process_ethernet_frame(&context, tcp, arp, &frame);
+    drop(state);
+    match processing_result {
         Ok(ProcessingResult::Nothing) => {}
         Ok(ProcessingResult::DHCPReset) => {
+            let mut state = STATE_MACHINE.lock();
             state.dhcp = DHCPStateMachine::Unconfigured(Instant::now())
         }
         Ok(ProcessingResult::DHCPOffered(l3, xid, configuration)) => {
             send_l3(l3).await?;
+            let mut state = STATE_MACHINE.lock();
             state.dhcp =
                 DHCPStateMachine::Offered(Instant::now(), Instant::now(), xid, configuration);
         }
@@ -232,12 +240,19 @@ pub async fn handle_incoming_ethernet_packet(buffer: &[u8]) -> Result<(), Networ
                 "Now configured: ",
                 configuration.ipv4.bright_green()
             );
+            let mut state = STATE_MACHINE.lock();
             state.dhcp = DHCPStateMachine::Assigned(configuration);
             state.arp.identity = Some((device.hardware_address(), configuration.ipv4));
         }
         Ok(ProcessingResult::Respond(l3)) => send_l3(l3).await?,
-        Ok(ProcessingResult::PushUdpMessage(message)) => state.udp.accept(message),
-        Ok(ProcessingResult::PushArpMessage(message)) => state.arp.accept(message).await,
+        Ok(ProcessingResult::PushUdpMessage(message)) => {
+            let state = STATE_MACHINE.lock();
+            state.udp.accept(message)
+        }
+        Ok(ProcessingResult::PushArpMessage(message)) => {
+            let mut state = STATE_MACHINE.lock();
+            state.arp.accept(message).await
+        }
         Err(BufferTooSmall) => {
             klog!(
                 "net_rx",

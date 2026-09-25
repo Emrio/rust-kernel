@@ -2,7 +2,7 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 
-use crate::net::arp::{ARP_PACKET, ARPOperation, ARPPacket, HardwareType, ProtocolType};
+use crate::net::arp::{ARP_PACKET, ARPCache, ARPOperation, ARPPacket, HardwareType, ProtocolType};
 use crate::net::ethernet::address::EthernetAddress;
 use crate::net::ethernet::ethertype::EtherType;
 use crate::net::ethernet::{ETHERNET_HEADER, EthernetFrame};
@@ -41,6 +41,7 @@ fn icmp_echo_request_is_met_with_reply() {
     let Ok(ProcessingResult::Respond(response)) = process_ethernet_frame(
         &NetContext::from_hardware_address(my_hardware_address),
         &mut TCPConnectionPool::default(),
+        &mut ARPCache::default(),
         &frame,
     ) else {
         panic!("Expected response")
@@ -112,7 +113,13 @@ fn arp_request_is_dispatched_for_processing() {
     let frame = EthernetFrame::new(packet.as_slice()).unwrap();
 
     let ctx = NetContext::from_addresses(target_hw, target_ip);
-    let result = process_ethernet_frame(&ctx, &mut TCPConnectionPool::default(), &frame).unwrap();
+    let result = process_ethernet_frame(
+        &ctx,
+        &mut TCPConnectionPool::default(),
+        &mut ARPCache::default(),
+        &frame,
+    )
+    .unwrap();
 
     assert!(matches!(result, ProcessingResult::PushArpMessage(_)));
 }

@@ -198,7 +198,7 @@ impl Cache {
         self.add_entry(address, mac);
     }
 
-    fn add_entry(&mut self, ipv4: IPv4Address, ethernet: EthernetAddress) {
+    pub(crate) fn add_entry(&mut self, ipv4: IPv4Address, ethernet: EthernetAddress) {
         self.entries.insert(
             ipv4,
             Entry {
