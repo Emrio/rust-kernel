@@ -61,6 +61,7 @@ pub(crate) struct Resolution {
     last_request: Instant,
 }
 
+#[derive(Debug)]
 pub enum ResolutionError {
     TimedOut,
     UnconfiguredIdentity,

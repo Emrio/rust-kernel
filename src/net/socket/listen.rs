@@ -9,6 +9,21 @@ pub enum Listen {
     SpecificAddress(IPv4Address, u16),
 }
 
+impl Listen {
+    pub fn port(&self) -> u16 {
+        match self {
+            Listen::AnyAddress(port) | Listen::SpecificAddress(_, port) => *port,
+        }
+    }
+
+    pub fn address(&self) -> Option<IPv4Address> {
+        match self {
+            Listen::SpecificAddress(address, _) => Some(*address),
+            _ => None,
+        }
+    }
+}
+
 pub enum ListenParseError {
     MissingSemicolon,
     InvalidIPv4Address(IPv4AddressParseError),

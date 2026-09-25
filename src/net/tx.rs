@@ -492,6 +492,7 @@ pub(super) fn send_l2(l2: L2) -> Result<(), NetworkError> {
     Ok(())
 }
 
+#[derive(Debug)]
 pub enum NetworkError {
     Arp(ARPResolutionError),
 }

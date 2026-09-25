@@ -63,9 +63,28 @@ impl Socket {
         }
     }
 
-    pub async fn send(_address: IPv4Address, _port: u16, _payload: &[u8]) {
-        // TODO : Arp resolution + default gateway
-        unimplemented!()
+    pub async fn send(
+        &self,
+        address: IPv4Address,
+        port: u16,
+        payload: Vec<u8>,
+    ) -> Result<(), SocketError> {
+        tx::send_l3(L3::IPv4 {
+            source: self
+                .listen
+                .address()
+                .or_else(get_my_ipv4_address)
+                .ok_or(SocketError::DHCPNotReady)?,
+            destination: address,
+            protocol: Protocol::UDP,
+            next: L4::Udp {
+                source: self.listen.port(),
+                destination: port,
+                next: L7::Buffer(payload),
+            },
+        })
+        .await
+        .map_err(SocketError::NetworkError)
     }
 }
 
@@ -82,6 +101,7 @@ pub struct Message {
     payload: Vec<u8>,
 }
 
+#[derive(Debug)]
 pub enum SocketError {
     DHCPNotReady,
     NetworkError(NetworkError),
@@ -110,14 +130,8 @@ impl Message {
     }
 
     pub async fn send(&self, buffer: &[u8]) -> Result<(), SocketError> {
-        let source = {
-            let state = STATE_MACHINE.lock();
-            let device = DEVICE.get().expect("device to be ready");
-            let context = NetContext::from_device_and_state(device, &state);
-            context.ipv4_address().ok_or(SocketError::DHCPNotReady)?
-        };
         tx::send_l3(L3::IPv4 {
-            source,
+            source: get_my_ipv4_address().ok_or(SocketError::DHCPNotReady)?,
             destination: self.remote_address,
             protocol: Protocol::UDP,
             next: L4::Udp {
@@ -163,4 +177,11 @@ impl ListenerPool {
         }
         handle.waker.wake();
     }
+}
+
+fn get_my_ipv4_address() -> Option<IPv4Address> {
+    let state = STATE_MACHINE.lock();
+    let device = DEVICE.get().expect("device to be ready");
+    let context = NetContext::from_device_and_state(device, &state);
+    context.ipv4_address()
 }

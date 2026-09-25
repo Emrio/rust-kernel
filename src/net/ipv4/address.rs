@@ -69,6 +69,7 @@ impl TryInto<IPv4Address> for &[u8] {
 //     }
 // }
 
+#[derive(Debug)]
 pub enum IPv4AddressParseError {
     MissingThreeDot,
     ParseU8Error,
