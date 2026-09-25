@@ -22,6 +22,7 @@ use crate::net::ipv4::protocol::Protocol;
 use crate::net::ipv4::ttl::TimeToLive;
 use crate::net::ipv4::{IPV4_PACKET, IPv4Packet};
 use crate::net::rx::NetContext;
+use crate::net::socket::TCPError;
 use crate::net::tcp::sequence::Sequence;
 use crate::net::tcp::{TCP_HEADER, TCPPacket};
 use crate::net::udp::{UDP_HEADER, UDPPacket};
@@ -462,6 +463,7 @@ pub(super) fn send_l2(l2: L2) -> Result<(), NetworkError> {
 #[derive(Debug)]
 pub enum NetworkError {
     Arp(ARPResolutionError),
+    Tcp(TCPError),
 }
 
 pub(super) async fn send_l3(l3: L3) -> Result<(), NetworkError> {

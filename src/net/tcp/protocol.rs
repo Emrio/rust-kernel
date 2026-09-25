@@ -22,16 +22,12 @@ pub struct TransmissionControlBlock {
 
     snd_una: Sequence,
     snd_nxt: Sequence,
-    snd_wnd: u32,
-
+    // snd_wnd: u32,
     rcv_nxt: Sequence,
-    rcv_wnd: u32,
-
+    // rcv_wnd: u32,
     iss: Sequence,
     irs: Sequence,
-
-    // TODO: queue + waker, maybe impl Stream?
-    snd_buf: Vec<u8>,
+    // snd_buf: Vec<u8>,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
@@ -70,12 +66,12 @@ impl TransmissionControlBlock {
             state: State::Listen,
             snd_una: 0.into(),
             snd_nxt: 0.into(),
-            snd_wnd: 0,
+            // snd_wnd: 0,
             rcv_nxt: 0.into(),
-            rcv_wnd: 0,
+            // rcv_wnd: 0,
             iss: 0.into(),
             irs: 0.into(),
-            snd_buf: Vec::new(),
+            // snd_buf: Vec::new(),
         }
     }
 
@@ -271,6 +267,26 @@ impl TransmissionControlBlock {
         self.state = State::LastAck;
 
         Ok(Some(response))
+    }
+
+    pub fn send_data(&mut self, payload: &[u8]) -> Result<Vec<u8>, BufferTooSmall> {
+        let mut buffer = vec![0; TCP_HEADER + payload.len()];
+        let mut packet = TCPPacket::new(&mut buffer)?;
+
+        packet
+            .set_source(self.local_port)
+            .set_destination(self.remote_port)
+            .set_sequence(self.snd_nxt)
+            .set_acknowledgment(self.rcv_nxt)
+            .set_ack(true)
+            .set_psh(true)
+            .set_data_offset_and_reserved()
+            .set_window(MY_WINDOW as u16);
+        packet.payload_mut().copy_from_slice(payload);
+        packet.compute_checksum(self.local_address, self.remote_address);
+
+        self.snd_nxt += payload.len() as u32;
+        Ok(buffer)
     }
 }
 

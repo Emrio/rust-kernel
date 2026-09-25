@@ -13,10 +13,14 @@ use crate::net::STATE_MACHINE;
 use crate::net::handle::Handle;
 use crate::net::ipv4::IPv4Packet;
 use crate::net::ipv4::address::IPv4Address;
+use crate::net::ipv4::protocol::Protocol;
 use crate::net::socket::listen::Listen;
 use crate::net::tcp::TCPPacket;
 use crate::net::tcp::protocol::AcceptResult;
 use crate::net::tcp::protocol::{Id, TransmissionControlBlock, generate_rst};
+use crate::net::tx;
+use crate::net::tx::L4;
+use crate::net::tx::NetworkError;
 use crate::print::colors::Colorable;
 
 pub struct Socket;
@@ -93,17 +97,20 @@ pub struct Receive {
     stream: Arc<ByteStream>,
 }
 
-pub struct ConnectionClosed;
+#[derive(Debug)]
+pub enum Error {
+    ConnectionClosed,
+}
 
 impl Future for Receive {
-    type Output = Result<Vec<u8>, ConnectionClosed>;
+    type Output = Result<Vec<u8>, Error>;
 
     fn poll(
         self: core::pin::Pin<&mut Self>,
         cx: &mut core::task::Context<'_>,
     ) -> Poll<Self::Output> {
         if self.stream.closed.load(Ordering::Acquire) {
-            Err(ConnectionClosed)?
+            Err(Error::ConnectionClosed)?
         }
 
         let mut buffer = self.stream.buffer.lock();
@@ -115,7 +122,7 @@ impl Future for Receive {
         self.stream.waker.register(cx.waker());
 
         if self.stream.closed.load(Ordering::Acquire) {
-            Err(ConnectionClosed)?
+            Err(Error::ConnectionClosed)?
         }
 
         let mut buffer = self.stream.buffer.lock();
@@ -146,8 +153,27 @@ impl Connection {
         self.id.3
     }
 
-    pub fn send(&self, _buffer: &[u8]) {
-        unimplemented!()
+    pub async fn send(&self, buffer: &[u8]) -> Result<(), NetworkError> {
+        let segment = {
+            let mut state = STATE_MACHINE.lock();
+            let connection = state
+                .tcp
+                .connections
+                .get_mut(&self.id)
+                .ok_or(NetworkError::Tcp(Error::ConnectionClosed))?;
+            connection
+                .tcb_mut()
+                .send_data(buffer)
+                .expect("buffer should not be too small")
+        };
+
+        tx::send_l3(tx::L3::IPv4 {
+            source: self.id.0,
+            destination: self.id.2,
+            protocol: Protocol::TCP,
+            next: L4::Buffer(segment),
+        })
+        .await
     }
 
     pub fn receive(&self) -> Receive {

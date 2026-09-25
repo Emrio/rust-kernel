@@ -4,6 +4,7 @@ mod tcp;
 mod udp;
 
 pub use tcp::ConnectionPool as TCPConnectionPool;
+pub use tcp::Error as TCPError;
 pub use tcp::Socket as TCPSocket;
 pub use udp::ListenerPool as UDPListenerPool;
 pub use udp::Message as UDPMessage;
