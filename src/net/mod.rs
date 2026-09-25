@@ -1,6 +1,7 @@
 use core::time::Duration;
 
 use crate::drivers::i82540em::DEVICE;
+use crate::net::arp::ARPCache;
 use crate::net::device::NetworkDevice;
 use crate::net::ipv4::mask::IPv4Mask;
 use crate::net::socket::TCPConnectionPool;
@@ -51,6 +52,7 @@ pub struct StateMachine {
     dhcp: DHCPStateMachine,
     tcp: TCPConnectionPool,
     udp: UDPListenerPool,
+    arp: ARPCache,
 }
 
 impl StateMachine {
@@ -70,6 +72,7 @@ pub static STATE_MACHINE: spin::Mutex<StateMachine> = spin::Mutex::new(StateMach
     dhcp: DHCPStateMachine::Unconfigured(Instant::zero()),
     tcp: TCPConnectionPool::new(),
     udp: UDPListenerPool::new(),
+    arp: ARPCache::new(),
 });
 
 async fn net_loop_logic() {
@@ -119,6 +122,7 @@ async fn net_loop_logic() {
         {
             // DHCP lease expired
             state_machine.dhcp = DHCPStateMachine::Unconfigured(Instant::now());
+            state_machine.arp.identity = None;
 
             let context = rx::NetContext::from_device_and_state(device, &state_machine);
             let buffer = tx::generate_dhcp_discover(&context).expect("buffer too small");

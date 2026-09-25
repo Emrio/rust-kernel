@@ -6,19 +6,15 @@ use alloc::vec::Vec;
 use core::task::Poll;
 
 use crate::drivers::i82540em::DEVICE;
-use crate::net::STATE_MACHINE;
-use crate::net::device::NetworkDevice;
-use crate::net::ethernet::EthernetFrame;
-use crate::net::ethernet::address::EthernetAddress;
-use crate::net::ethernet::ethertype::EtherType;
 use crate::net::handle::Handle;
 use crate::net::ipv4::IPv4Packet;
 use crate::net::ipv4::address::IPv4Address;
 use crate::net::ipv4::protocol::Protocol;
 use crate::net::rx::NetContext;
 use crate::net::socket::listen::Listen;
-use crate::net::tx::{L2, L3, L4, L7, build};
+use crate::net::tx::{L3, L4, L7, NetworkError};
 use crate::net::udp::UDPPacket;
+use crate::net::{STATE_MACHINE, tx};
 use crate::print::colors::Colorable;
 
 pub struct MessageAccept {
@@ -81,22 +77,19 @@ impl Drop for Socket {
 
 pub struct Message {
     local_port: u16,
-    remote_ethernet_address: EthernetAddress,
     remote_address: IPv4Address,
     remote_port: u16,
     payload: Vec<u8>,
 }
 
-pub struct DHCPNotReady;
+pub enum SocketError {
+    DHCPNotReady,
+    NetworkError(NetworkError),
+}
 
 impl Message {
-    pub fn new(
-        frame: &EthernetFrame<&[u8]>,
-        ipv4: &IPv4Packet<&[u8]>,
-        udp: &UDPPacket<&[u8]>,
-    ) -> Self {
+    pub fn new(ipv4: &IPv4Packet<&[u8]>, udp: &UDPPacket<&[u8]>) -> Self {
         Self {
-            remote_ethernet_address: frame.source(),
             remote_address: ipv4.source(),
             remote_port: udp.source(),
             local_port: udp.destination(),
@@ -116,29 +109,25 @@ impl Message {
         &self.payload
     }
 
-    pub fn send(&self, buffer: &[u8]) -> Result<(), DHCPNotReady> {
-        let state = STATE_MACHINE.lock();
-        let device = DEVICE.get().expect("device to be ready");
-        let context = NetContext::from_device_and_state(device, &state);
-        device.send_packet(
-            &build(L2::Ethernet {
-                source: context.hardware_address(),
-                destination: self.remote_ethernet_address,
-                ethertype: EtherType::IPv4,
-                next: L3::IPv4 {
-                    source: context.ipv4_address().ok_or(DHCPNotReady)?,
-                    destination: self.remote_address,
-                    protocol: Protocol::UDP,
-                    next: L4::Udp {
-                        source: self.local_port,
-                        destination: self.remote_port,
-                        next: L7::Buffer(buffer.to_vec()),
-                    },
-                },
-            })
-            .expect("buffer to be of correct size"),
-        );
-        Ok(())
+    pub async fn send(&self, buffer: &[u8]) -> Result<(), SocketError> {
+        let source = {
+            let state = STATE_MACHINE.lock();
+            let device = DEVICE.get().expect("device to be ready");
+            let context = NetContext::from_device_and_state(device, &state);
+            context.ipv4_address().ok_or(SocketError::DHCPNotReady)?
+        };
+        tx::send_l3(L3::IPv4 {
+            source,
+            destination: self.remote_address,
+            protocol: Protocol::UDP,
+            next: L4::Udp {
+                source: self.local_port,
+                destination: self.remote_port,
+                next: L7::Buffer(buffer.to_vec()),
+            },
+        })
+        .await
+        .map_err(SocketError::NetworkError)
     }
 }
 

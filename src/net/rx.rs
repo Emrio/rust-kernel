@@ -8,7 +8,7 @@ use futures_util::task::AtomicWaker;
 use futures_util::{Stream, StreamExt};
 
 use crate::drivers::i82540em::DEVICE;
-use crate::net::arp::{ARPOperation, ARPPacket};
+use crate::net::arp::{ARPMessage, ARPPacket};
 use crate::net::device::NetworkDevice;
 use crate::net::dhcp::DHCPPacket;
 use crate::net::error::BufferTooSmall;
@@ -18,10 +18,9 @@ use crate::net::icmp::ICMPPacket;
 use crate::net::ipv4::IPv4Packet;
 use crate::net::ipv4::address::IPv4Address;
 use crate::net::ipv4::protocol::Protocol;
-use crate::net::socket::UDPMessage;
+use crate::net::socket::{TCPConnectionPool, UDPMessage};
 use crate::net::tcp::TCPPacket;
-use crate::net::tcp::protocol::ConnectionPool;
-use crate::net::tx::{self, generate_arp_reply, generate_echo_reply};
+use crate::net::tx::{self, generate_echo_reply};
 use crate::net::udp::UDPPacket;
 use crate::net::{DHCPConfiguration, DHCPStateMachine, STATE_MACHINE, StateMachine, dhcp};
 use crate::print::colors::Colorable;
@@ -66,18 +65,19 @@ impl NetContext {
     }
 }
 
-pub enum ProcessingResult {
+pub(crate) enum ProcessingResult {
     Nothing,
     DHCPReset,
     DHCPOffered(Vec<u8>, u32, DHCPConfiguration),
     DHCPAccepted(DHCPConfiguration),
     PushUdpMessage(UDPMessage),
+    PushArpMessage(ARPMessage),
     Respond(Vec<u8>),
 }
 
-pub fn process_ethernet_frame(
+pub(crate) fn process_ethernet_frame(
     ctx: &NetContext,
-    tcp_pool: &mut ConnectionPool,
+    tcp_pool: &mut TCPConnectionPool,
     frame: &EthernetFrame<&[u8]>,
 ) -> Result<ProcessingResult, BufferTooSmall> {
     // klog!("net_rx", "Ethernet frame: ", frame);
@@ -93,32 +93,7 @@ pub fn process_ethernet_frame(
 
             // klog!("net_rx", "ARP packet: ", arp);
 
-            // if arp.operation() == ARPOperation::Reply
-            //     && ctx.ipv4_address().is_none()
-            //     && arp.target_hardware_address() == ctx.hardware_address()
-            // {
-            //     kprintln!("-> My IPv4: {}", arp.target_protocol_address());
-            //     return Ok(ProcessingResult::SetIpv4(arp.target_protocol_address()));
-            // }
-
-            if arp.operation() == ARPOperation::Request
-                && let Some(ipv4_address) = ctx.ipv4_address()
-                && ipv4_address == arp.target_protocol_address()
-            {
-                klog!(
-                    "arp",
-                    arp.sender_hardware_address().yellow(),
-                    "/",
-                    arp.sender_protocol_address().green(),
-                    " wants my hardware address!"
-                );
-
-                return Ok(ProcessingResult::Respond(generate_arp_reply(
-                    ctx, frame, &arp,
-                )?));
-            }
-
-            Ok(ProcessingResult::Nothing)
+            Ok(ProcessingResult::PushArpMessage(arp.into()))
         }
 
         EtherType::IPv4 => {
@@ -220,7 +195,7 @@ pub fn process_ethernet_frame(
                         };
                     }
 
-                    let message = UDPMessage::new(frame, &ipv4, &udp);
+                    let message = UDPMessage::new(&ipv4, &udp);
                     Ok(ProcessingResult::PushUdpMessage(message))
                 }
             }
@@ -228,7 +203,7 @@ pub fn process_ethernet_frame(
     }
 }
 
-pub fn handle_incoming_ethernet_packet(buffer: &[u8]) {
+pub async fn handle_incoming_ethernet_packet(buffer: &[u8]) {
     // kprintln!("-> {:02x?} (size: {})", buffer, buffer.len());
 
     let Ok(frame) = EthernetFrame::new(buffer) else {
@@ -244,7 +219,8 @@ pub fn handle_incoming_ethernet_packet(buffer: &[u8]) {
     let mut state = STATE_MACHINE.lock();
     let device = DEVICE.get().expect("device to be ready");
     let context = NetContext::from_device_and_state(device, &state);
-    match process_ethernet_frame(&context, &mut state.tcp, &frame) {
+    let StateMachine { tcp, .. } = &mut *state;
+    match process_ethernet_frame(&context, tcp, &frame) {
         Ok(ProcessingResult::Nothing) => {}
         Ok(ProcessingResult::DHCPReset) => {
             state.dhcp = DHCPStateMachine::Unconfigured(Instant::now())
@@ -260,10 +236,12 @@ pub fn handle_incoming_ethernet_packet(buffer: &[u8]) {
                 "Now configured: ",
                 configuration.ipv4.bright_green()
             );
-            state.dhcp = DHCPStateMachine::Assigned(configuration)
+            state.dhcp = DHCPStateMachine::Assigned(configuration);
+            state.arp.identity = Some((device.hardware_address(), configuration.ipv4));
         }
         Ok(ProcessingResult::Respond(buffer)) => device.send_packet(&buffer),
         Ok(ProcessingResult::PushUdpMessage(message)) => state.udp.accept(message),
+        Ok(ProcessingResult::PushArpMessage(message)) => state.arp.accept(message).await,
         Err(BufferTooSmall) => {
             klog!(
                 "net_rx",
@@ -302,6 +280,6 @@ pub async fn rx_loop() {
     let mut stream = RxStream;
 
     while let Some(packet) = stream.next().await {
-        handle_incoming_ethernet_packet(&packet);
+        handle_incoming_ethernet_packet(&packet).await;
     }
 }

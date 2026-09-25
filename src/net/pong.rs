@@ -28,7 +28,7 @@ pub async fn udp_pong_server(port: u16) -> () {
             "!"
         );
 
-        if message.send(&make_pong(message.payload())).is_err() {
+        if message.send(&make_pong(message.payload())).await.is_err() {
             klog!("udp_pong_server", "Pong failed".red());
         }
     }

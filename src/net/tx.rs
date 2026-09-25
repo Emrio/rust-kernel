@@ -3,8 +3,12 @@ extern crate alloc;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use crate::net::DHCPConfiguration;
-use crate::net::arp::{ARP_PACKET, ARPOperation, ARPPacket, HardwareType, ProtocolType};
+use crate::drivers::i82540em::DEVICE;
+use crate::net::arp::{
+    ARP_PACKET, ARPOperation, ARPPacket, ARPResolutionError, HardwareType, ProtocolType,
+    ResolveStart,
+};
+use crate::net::device::NetworkDevice;
 use crate::net::dhcp::option::DHCPOption;
 use crate::net::dhcp::{self, DHCP_HEADER, DHCPPacket};
 use crate::net::error::BufferTooSmall;
@@ -21,26 +25,8 @@ use crate::net::rx::NetContext;
 use crate::net::tcp::sequence::Sequence;
 use crate::net::tcp::{TCP_HEADER, TCPPacket};
 use crate::net::udp::{UDP_HEADER, UDPPacket};
+use crate::net::{DHCPConfiguration, STATE_MACHINE};
 use crate::random::random_u32;
-
-pub fn generate_arp_reply(
-    ctx: &NetContext,
-    request_frame: &EthernetFrame<&[u8]>,
-    request_arp: &ARPPacket<&[u8]>,
-) -> Result<Vec<u8>, BufferTooSmall> {
-    build(L2::Ethernet {
-        source: ctx.hardware_address(),
-        destination: request_frame.source(),
-        ethertype: EtherType::ARP,
-        next: L3::Arp {
-            operation: ARPOperation::Reply,
-            sender_hardware_address: ctx.hardware_address(),
-            sender_protocol_address: request_arp.target_protocol_address(),
-            target_hardware_address: request_arp.sender_hardware_address(),
-            target_protocol_address: request_arp.sender_protocol_address(),
-        },
-    })
-}
 
 pub fn generate_echo_reply(
     ctx: &NetContext,
@@ -498,4 +484,58 @@ pub(crate) fn build(l2: L2) -> Result<Vec<u8>, BufferTooSmall> {
     };
 
     Ok(packet)
+}
+
+pub(super) fn send_l2(l2: L2) -> Result<(), NetworkError> {
+    let device = DEVICE.get().expect("device is not ready");
+    device.send_packet(&build(l2).expect("buffer too small"));
+    Ok(())
+}
+
+pub enum NetworkError {
+    Arp(ARPResolutionError),
+}
+
+pub(super) async fn send_l3(l3: L3) -> Result<(), NetworkError> {
+    let device = DEVICE.get().expect("device is not ready");
+    match &l3 {
+        L3::IPv4 { destination, .. } => send_l2(L2::Ethernet {
+            source: device.hardware_address(),
+            destination: arp_resolve(*destination).await.map_err(NetworkError::Arp)?,
+            ethertype: EtherType::IPv4,
+            next: l3,
+        }),
+        L3::Arp {
+            operation,
+            target_hardware_address,
+            ..
+        } => send_l2(L2::Ethernet {
+            source: device.hardware_address(),
+            destination: match operation {
+                ARPOperation::Reply => *target_hardware_address,
+                ARPOperation::Request => EthernetAddress::BROADCAST,
+            },
+            ethertype: EtherType::ARP,
+            next: l3,
+        }),
+    }
+}
+
+async fn arp_resolve(ipv4_address: IPv4Address) -> Result<EthernetAddress, ARPResolutionError> {
+    let start = {
+        let mut state = STATE_MACHINE.lock();
+        state.arp.resolve_start(ipv4_address)?
+    };
+
+    match start {
+        ResolveStart::Known(hardware_address) => Ok(hardware_address),
+        ResolveStart::Pending(resolution) => {
+            let hardware_address = resolution.await?;
+            STATE_MACHINE
+                .lock()
+                .arp
+                .resolve_finish(ipv4_address, hardware_address);
+            Ok(hardware_address)
+        }
+    }
 }

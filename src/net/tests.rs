@@ -13,9 +13,6 @@ use crate::net::ipv4::protocol::Protocol;
 use crate::net::ipv4::{IPV4_PACKET, IPv4Packet};
 use crate::net::rx::{NetContext, ProcessingResult, process_ethernet_frame};
 use crate::net::socket::TCPConnectionPool;
-use crate::net::socket::listen::Listen;
-use crate::net::tcp::TCPPacket;
-use crate::net::tcp::sequence::Sequence;
 use crate::net::tx::{L2, L3, L4, L7, build};
 
 #[test_case]

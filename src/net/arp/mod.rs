@@ -1,7 +1,11 @@
+mod cache;
 mod hardware_type;
 mod operation;
 mod protocol_type;
 
+pub use cache::Cache as ARPCache;
+pub use cache::ResolutionError as ARPResolutionError;
+pub(crate) use cache::{ARPMessage, ResolveStart};
 pub use hardware_type::HardwareType;
 pub use operation::Operation as ARPOperation;
 pub use protocol_type::ProtocolType;
