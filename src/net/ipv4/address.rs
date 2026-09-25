@@ -2,7 +2,7 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 
-use crate::net::error::BufferTooSmall;
+use crate::net::{error::BufferTooSmall, ipv4::mask::IPv4Mask};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PartialOrd, Ord)]
 pub struct IPv4Address([u8; 4]);
@@ -54,6 +54,15 @@ impl TryInto<IPv4Address> for &[u8] {
         } else {
             Err(BufferTooSmall)
         }
+    }
+}
+
+impl core::ops::BitAnd<IPv4Mask> for IPv4Address {
+    type Output = IPv4Address;
+
+    fn bitand(self, rhs: IPv4Mask) -> Self::Output {
+        let masked = rhs.as_u32() & self.as_u32();
+        IPv4Address::from_bytes(&masked.to_be_bytes())
     }
 }
 

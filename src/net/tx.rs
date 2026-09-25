@@ -25,7 +25,7 @@ use crate::net::rx::NetContext;
 use crate::net::tcp::sequence::Sequence;
 use crate::net::tcp::{TCP_HEADER, TCPPacket};
 use crate::net::udp::{UDP_HEADER, UDPPacket};
-use crate::net::{DHCPConfiguration, STATE_MACHINE};
+use crate::net::{DHCPConfiguration, DHCPStateMachine, STATE_MACHINE};
 use crate::random::random_u32;
 
 pub fn generate_echo_reply(
@@ -469,10 +469,9 @@ pub(super) async fn send_l3(l3: L3) -> Result<(), NetworkError> {
     match &l3 {
         L3::IPv4 { destination, .. } => send_l2(L2::Ethernet {
             source: device.hardware_address(),
-            destination: match *destination {
-                IPv4Address::BROADCAST => EthernetAddress::BROADCAST,
-                destination => arp_resolve(destination).await.map_err(NetworkError::Arp)?,
-            },
+            destination: resolve_ethernet_address(*destination)
+                .await
+                .map_err(NetworkError::Arp)?,
             ethertype: EtherType::IPv4,
             next: l3,
         }),
@@ -508,5 +507,180 @@ async fn arp_resolve(ipv4_address: IPv4Address) -> Result<EthernetAddress, ARPRe
                 .resolve_finish(ipv4_address, hardware_address);
             Ok(hardware_address)
         }
+    }
+}
+
+async fn resolve_ethernet_address(
+    ipv4_address: IPv4Address,
+) -> Result<EthernetAddress, ARPResolutionError> {
+    if ipv4_address == IPv4Address::BROADCAST {
+        return Ok(EthernetAddress::BROADCAST);
+    }
+
+    let state = STATE_MACHINE.lock();
+    let DHCPStateMachine::Assigned(DHCPConfiguration {
+        ipv4: my_ipv4,
+        netmask: Some(netmask),
+        router,
+        ..
+    }) = state.dhcp
+    else {
+        Err(ARPResolutionError::MissingNetmask)?
+    };
+    drop(state);
+
+    // is address local?
+    if ipv4_address & netmask == my_ipv4 & netmask {
+        return arp_resolve(ipv4_address).await;
+    }
+
+    let Some(router) = router else {
+        Err(ARPResolutionError::MissingRouter)?
+    };
+
+    arp_resolve(router).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::executor::block_on;
+    use crate::net::ipv4::mask::IPv4Mask;
+    use crate::time::Instant;
+    use core::time::Duration;
+
+    fn configuration(
+        ipv4: IPv4Address,
+        netmask: IPv4Mask,
+        router: Option<IPv4Address>,
+    ) -> DHCPConfiguration {
+        DHCPConfiguration {
+            invalid_at: Instant::now() + Duration::from_secs(3600),
+            ipv4,
+            netmask: Some(netmask),
+            router,
+            dns: None,
+        }
+    }
+
+    /// Fully drives a resolution to completion and caches the result, so that
+    /// the *next, independent* resolution for `address` hits the cache
+    /// (`ResolveStart::Known`) instead of ever touching the (unavailable in
+    /// tests) NIC through a fresh retransmission.
+    fn precache(my_ip: IPv4Address, address: IPv4Address, mac: EthernetAddress) {
+        let (my_mac, _) = STATE_MACHINE
+            .lock()
+            .arp
+            .identity
+            .expect("identity must be configured before calling precache()");
+
+        let resolution = {
+            let mut state = STATE_MACHINE.lock();
+            let ResolveStart::Pending(resolution) = state.arp.resolve_start(address).unwrap()
+            else {
+                panic!("expected a pending resolution (already cached?)")
+            };
+            resolution
+        };
+
+        let mut packet = [0u8; ARP_PACKET];
+        let mut arp = ARPPacket::new(packet.as_mut_slice()).unwrap();
+        arp.set_hardware_type(HardwareType::Ethernet)
+            .set_protocol_type(ProtocolType::IPv4)
+            .set_hardware_length(EthernetAddress::SIZE as u8)
+            .set_protocol_length(IPv4Address::SIZE as u8)
+            .set_operation(ARPOperation::Reply)
+            .set_sender_hardware_address(mac)
+            .set_sender_protocol_address(address)
+            .set_target_hardware_address(my_mac)
+            .set_target_protocol_address(my_ip);
+        let arp = ARPPacket::new(packet.as_slice()).unwrap();
+
+        block_on(STATE_MACHINE.lock().arp.accept(arp));
+
+        let resolved = block_on(resolution).expect("resolution should have completed");
+        assert_eq!(resolved, mac);
+        STATE_MACHINE.lock().arp.resolve_finish(address, resolved);
+    }
+
+    #[test_case]
+    fn resolves_broadcast_immediately_without_touching_state() {
+        let mac = block_on(resolve_ethernet_address(IPv4Address::BROADCAST)).unwrap();
+        assert_eq!(mac, EthernetAddress::BROADCAST);
+    }
+
+    #[test_case]
+    fn errors_with_missing_netmask_when_dhcp_is_unconfigured() {
+        STATE_MACHINE.lock().dhcp = DHCPStateMachine::Unconfigured(Instant::now());
+
+        let result = block_on(resolve_ethernet_address(IPv4Address::new(10, 0, 9, 2)));
+
+        assert!(matches!(result, Err(ARPResolutionError::MissingNetmask)));
+    }
+
+    #[test_case]
+    fn errors_with_missing_router_for_a_remote_address_without_a_router() {
+        let my_ip = IPv4Address::new(10, 0, 10, 1);
+        STATE_MACHINE.lock().dhcp =
+            DHCPStateMachine::Assigned(configuration(my_ip, IPv4Mask::new(255, 255, 255, 0), None));
+
+        // 8.8.8.8 is nowhere near 10.0.10.0/24.
+        let result = block_on(resolve_ethernet_address(IPv4Address::new(8, 8, 8, 8)));
+
+        assert!(matches!(result, Err(ARPResolutionError::MissingRouter)));
+    }
+
+    #[test_case]
+    fn resolves_a_local_address_directly_without_the_router() {
+        let my_mac = EthernetAddress::from_bytes(&[1, 2, 3, 4, 5, 6]);
+        let my_ip = IPv4Address::new(10, 0, 11, 1);
+        let peer_ip = IPv4Address::new(10, 0, 11, 2);
+        let peer_mac = EthernetAddress::from_bytes(&[7, 8, 9, 10, 11, 12]);
+        let router_ip = IPv4Address::new(10, 0, 11, 254);
+
+        {
+            let mut state = STATE_MACHINE.lock();
+            state.arp.identity = Some((my_mac, my_ip));
+            state.dhcp = DHCPStateMachine::Assigned(configuration(
+                my_ip,
+                IPv4Mask::new(255, 255, 255, 0),
+                Some(router_ip),
+            ));
+        }
+        precache(my_ip, peer_ip, peer_mac);
+
+        let resolved = block_on(resolve_ethernet_address(peer_ip)).unwrap();
+
+        assert_eq!(
+            resolved, peer_mac,
+            "a peer on the same subnet must be resolved directly, not via the router"
+        );
+    }
+
+    #[test_case]
+    fn resolves_a_remote_address_via_the_router() {
+        let my_mac = EthernetAddress::from_bytes(&[1, 2, 3, 4, 5, 6]);
+        let my_ip = IPv4Address::new(10, 0, 12, 1);
+        let remote_ip = IPv4Address::new(8, 8, 8, 8);
+        let router_ip = IPv4Address::new(10, 0, 12, 254);
+        let router_mac = EthernetAddress::from_bytes(&[13, 14, 15, 16, 17, 18]);
+
+        {
+            let mut state = STATE_MACHINE.lock();
+            state.arp.identity = Some((my_mac, my_ip));
+            state.dhcp = DHCPStateMachine::Assigned(configuration(
+                my_ip,
+                IPv4Mask::new(255, 255, 255, 0),
+                Some(router_ip),
+            ));
+        }
+        precache(my_ip, router_ip, router_mac);
+
+        let resolved = block_on(resolve_ethernet_address(remote_ip)).unwrap();
+
+        assert_eq!(
+            resolved, router_mac,
+            "a remote address must resolve to the router's MAC, never attempt direct ARP"
+        );
     }
 }

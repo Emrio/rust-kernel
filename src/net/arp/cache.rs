@@ -65,6 +65,8 @@ pub(crate) struct Resolution {
 pub enum ResolutionError {
     TimedOut,
     UnconfiguredIdentity,
+    MissingNetmask,
+    MissingRouter,
 }
 
 impl Future for Resolution {
@@ -285,7 +287,10 @@ mod tests {
     }
 
     /// Builds a synthetic ARP reply, as if `peer` had answered a request for its address.
-    fn reply_from(peer: (EthernetAddress, IPv4Address), requester: (EthernetAddress, IPv4Address)) -> ARPMessage {
+    fn reply_from(
+        peer: (EthernetAddress, IPv4Address),
+        requester: (EthernetAddress, IPv4Address),
+    ) -> ARPMessage {
         ARPMessage {
             hardware_type: HardwareType::Ethernet,
             hardware_length: EthernetAddress::SIZE,
