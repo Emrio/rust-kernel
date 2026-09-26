@@ -37,6 +37,7 @@ pub struct Id(pub IPv4Address, pub u16, pub IPv4Address, pub u16);
 pub struct AcceptResult {
     pub established: bool,
     pub destroyed: bool,
+    pub peer_closed: bool,
     pub response: Option<Vec<u8>>,
     pub received: Option<Vec<u8>>,
 }
@@ -204,6 +205,7 @@ impl TransmissionControlBlock {
             self.rcv_nxt += 1;
             return Ok(AcceptResult {
                 response: Some(self.generate_ack()?),
+                peer_closed: true,
                 destroyed: true,
                 ..Default::default()
             });
@@ -215,6 +217,7 @@ impl TransmissionControlBlock {
             self.rcv_nxt += 1;
             return Ok(AcceptResult {
                 response: Some(self.generate_ack()?),
+                peer_closed: true,
                 ..Default::default()
             });
         }
@@ -232,6 +235,16 @@ impl TransmissionControlBlock {
             self.rcv_nxt += 1;
             return Ok(AcceptResult {
                 response: Some(self.generate_ack()?),
+                peer_closed: true,
+                destroyed: true,
+                ..Default::default()
+            });
+        }
+
+        if self.state == State::Closing && packet.ack() && packet.acknowledgment() == self.snd_nxt {
+            klog!(serv!(self), "Closing -> Closed");
+            self.state = State::Closed;
+            return Ok(AcceptResult {
                 destroyed: true,
                 ..Default::default()
             });
@@ -262,11 +275,15 @@ impl TransmissionControlBlock {
             }
         }
 
-        if packet.fin() && packet.sequence() + packet.payload().len() as u32 == self.rcv_nxt {
-            klog!(serv!(self), "Received ", "FIN".bright_red());
-            self.state = State::CloseWait;
-            self.rcv_nxt += 1;
-        }
+        let peer_closed =
+            if packet.fin() && packet.sequence() + packet.payload().len() as u32 == self.rcv_nxt {
+                klog!(serv!(self), "Received ", "FIN".bright_red());
+                self.state = State::CloseWait;
+                self.rcv_nxt += 1;
+                true
+            } else {
+                false
+            };
 
         Ok(AcceptResult {
             response: if generated_ack {
@@ -274,6 +291,7 @@ impl TransmissionControlBlock {
             } else {
                 None
             },
+            peer_closed,
             received,
             ..Default::default()
         })
@@ -285,6 +303,7 @@ impl TransmissionControlBlock {
 
         self.state = match self.state {
             State::SynReceived | State::Established => State::FinWait1,
+            State::CloseWait => State::LastAck,
             State::Listen | State::Closed => State::Closed,
             state => state,
         };

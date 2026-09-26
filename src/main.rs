@@ -35,6 +35,7 @@ fn kmain(boot_info: &'static BootInfo) -> ! {
         serial::print_keypresses(),
         net::pong::udp_pong_server(4242),
         net::pong::tcp_pong_server(4242),
+        net::socket::cleanup_task(),
     ));
 
     hlt_loop()

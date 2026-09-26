@@ -87,6 +87,7 @@ struct ByteStream {
     buffer: spin::Mutex<VecDeque<u8>>,
     waker: AtomicWaker,
     closed: AtomicBool,
+    peer_closed: AtomicBool,
 }
 
 pub struct Connection {
@@ -96,6 +97,26 @@ pub struct Connection {
 
 pub struct Receive {
     stream: Arc<ByteStream>,
+}
+
+impl Receive {
+    fn try_receive(&self) -> Option<Result<Vec<u8>, Error>> {
+        if self.stream.closed.load(Ordering::Acquire) {
+            return Some(Err(Error::ConnectionClosed));
+        }
+
+        let mut buffer = self.stream.buffer.lock();
+        if !buffer.is_empty() {
+            return Some(Ok(buffer.drain(..).collect()));
+        }
+        drop(buffer);
+
+        if self.stream.peer_closed.load(Ordering::Acquire) {
+            return Some(Ok(Vec::new()));
+        }
+
+        None
+    }
 }
 
 #[derive(Debug)]
@@ -110,27 +131,13 @@ impl Future for Receive {
         self: core::pin::Pin<&mut Self>,
         cx: &mut core::task::Context<'_>,
     ) -> Poll<Self::Output> {
-        if self.stream.closed.load(Ordering::Acquire) {
-            Err(Error::ConnectionClosed)?
+        if let Some(result) = self.try_receive() {
+            return Poll::Ready(result);
         }
-
-        let mut buffer = self.stream.buffer.lock();
-        if !buffer.is_empty() {
-            return Poll::Ready(Ok(buffer.drain(..).collect()));
-        }
-        drop(buffer);
 
         self.stream.waker.register(cx.waker());
 
-        if self.stream.closed.load(Ordering::Acquire) {
-            Err(Error::ConnectionClosed)?
-        }
-
-        let mut buffer = self.stream.buffer.lock();
-        if !buffer.is_empty() {
-            return Poll::Ready(Ok(buffer.drain(..).collect()));
-        }
-        Poll::Pending
+        self.try_receive().map(Poll::Ready).unwrap_or(Poll::Pending)
     }
 }
 
@@ -142,6 +149,7 @@ impl Connection {
                 buffer: spin::Mutex::new(VecDeque::with_capacity(4096)),
                 waker: AtomicWaker::new(),
                 closed: AtomicBool::new(false),
+                peer_closed: AtomicBool::new(false),
             }),
         }
     }
@@ -240,7 +248,6 @@ impl ConnectionStatus {
     }
 }
 
-// TODO handle close, handle send
 #[derive(Default)]
 pub struct ConnectionPool {
     connections: BTreeMap<Id, ConnectionStatus>,
@@ -310,6 +317,10 @@ impl ConnectionPool {
                 let connection = Connection::new(id);
                 let stream = connection.stream.clone();
 
+                if result.peer_closed {
+                    connection.stream.peer_closed.store(true, Ordering::Release);
+                }
+
                 if handle.queue.push(connection).is_err() {
                     klog!("tcp", "Queue full!".red())
                 }
@@ -317,9 +328,16 @@ impl ConnectionPool {
 
                 ConnectionStatus::Established(tcb, stream)
             }
-            ConnectionStatus::Established(tcb, stream) if let Some(received) = result.received => {
-                stream.buffer.lock().extend(received);
-                stream.waker.wake();
+            ConnectionStatus::Established(tcb, stream) => {
+                if let Some(received) = result.received {
+                    stream.buffer.lock().extend(received);
+                    stream.waker.wake();
+                }
+
+                if result.peer_closed {
+                    stream.peer_closed.store(true, Ordering::Release);
+                    stream.waker.wake();
+                }
 
                 ConnectionStatus::Established(tcb, stream)
             }
