@@ -8,6 +8,7 @@ use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
 use core::task::Poll;
 use futures_util::task::AtomicWaker;
+use lazy_static::lazy_static;
 
 use crate::net::STATE_MACHINE;
 use crate::net::handle::Handle;
@@ -182,14 +183,41 @@ impl Connection {
         }
     }
 
-    pub fn close(&self) {
-        todo!()
+    pub async fn close(&self) -> Result<(), NetworkError> {
+        close(self.id).await
     }
+}
+
+async fn close(id: Id) -> Result<(), NetworkError> {
+    let segment = {
+        let mut state = STATE_MACHINE.lock();
+        let Some(connection) = state.tcp.connections.get_mut(&id) else {
+            return Ok(());
+        };
+        let Some(segment) = connection
+            .tcb_mut()
+            .close()
+            .expect("buffer should not be too small")
+        else {
+            return Ok(());
+        };
+        segment
+    };
+
+    tx::send_l3(tx::L3::IPv4 {
+        source: id.0,
+        destination: id.2,
+        protocol: Protocol::TCP,
+        next: L4::Buffer(segment),
+    })
+    .await
 }
 
 impl Drop for Connection {
     fn drop(&mut self) {
-        todo!()
+        let pending_closes = PENDING_CLOSES.lock();
+        let _ = pending_closes.queue.push(self.id);
+        pending_closes.waker.wake();
     }
 }
 
@@ -326,5 +354,43 @@ impl ConnectionPool {
 
         let id = connection.tcb().id();
         self.process_result(id, result)
+    }
+}
+
+lazy_static! {
+    static ref PENDING_CLOSES: spin::Mutex<Handle<Id>> = spin::Mutex::new(Handle::new(42));
+}
+
+struct PendingCloseWatcher;
+
+impl Future for PendingCloseWatcher {
+    type Output = ();
+
+    fn poll(
+        self: core::pin::Pin<&mut Self>,
+        cx: &mut core::task::Context<'_>,
+    ) -> Poll<Self::Output> {
+        let pending_closes = PENDING_CLOSES.lock();
+        if !pending_closes.queue.is_empty() {
+            return Poll::Ready(());
+        }
+        pending_closes.waker.register(cx.waker());
+        drop(pending_closes);
+        let pending_closes = PENDING_CLOSES.lock();
+        if !pending_closes.queue.is_empty() {
+            return Poll::Ready(());
+        }
+        Poll::Pending
+    }
+}
+
+pub async fn handle_pending_closes() {
+    loop {
+        PendingCloseWatcher.await;
+
+        let pending_closes = PENDING_CLOSES.lock();
+        while let Some(id) = pending_closes.queue.pop() {
+            let _ = close(id).await;
+        }
     }
 }
