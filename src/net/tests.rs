@@ -1,7 +1,5 @@
 extern crate alloc;
 
-use alloc::vec::Vec;
-
 use crate::net::arp::{ARP_PACKET, ARPCache, ARPOperation, ARPPacket, HardwareType, ProtocolType};
 use crate::net::ethernet::address::EthernetAddress;
 use crate::net::ethernet::ethertype::EtherType;
@@ -13,7 +11,7 @@ use crate::net::ipv4::protocol::Protocol;
 use crate::net::ipv4::{IPV4_PACKET, IPv4Packet};
 use crate::net::rx::{NetContext, ProcessingResult, process_ethernet_frame};
 use crate::net::socket::TCPConnectionPool;
-use crate::net::tx::{L2, L3, L4, L7, build};
+use crate::net::tx::{L3, L4, L7};
 
 #[test_case]
 fn icmp_echo_request_is_met_with_reply() {
@@ -122,48 +120,4 @@ fn arp_request_is_dispatched_for_processing() {
     .unwrap();
 
     assert!(matches!(result, ProcessingResult::PushArpMessage(_)));
-}
-
-#[allow(clippy::too_many_arguments)]
-fn build_tcp_frame(
-    eth_dst: EthernetAddress,
-    eth_src: EthernetAddress,
-    ip_dst: IPv4Address,
-    ip_src: IPv4Address,
-    tcp_src_port: u16,
-    tcp_dst_port: u16,
-    seq: u32,
-    ack: u32,
-    syn: bool,
-    ack_flag: bool,
-    fin: bool,
-    payload: &[u8],
-) -> Vec<u8> {
-    build(L2::Ethernet {
-        source: eth_src,
-        destination: eth_dst,
-        ethertype: EtherType::IPv4,
-        next: L3::IPv4 {
-            source: ip_src,
-            destination: ip_dst,
-            protocol: Protocol::TCP,
-            next: L4::Tcp {
-                source: tcp_src_port,
-                destination: tcp_dst_port,
-                sequence: seq.into(),
-                acknowledgment: ack.into(),
-                cwr: false,
-                ece: false,
-                urg: false,
-                ack: ack_flag,
-                psh: false,
-                rst: false,
-                syn,
-                fin,
-                window: 0,
-                next: L7::Buffer(payload.to_vec()),
-            },
-        },
-    })
-    .unwrap()
 }

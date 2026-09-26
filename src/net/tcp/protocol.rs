@@ -913,27 +913,4 @@ mod tests {
 
         assert_eq!(tcb.state, State::Closed);
     }
-
-    /// Wraps a raw TCP segment (as produced by `segment`) in an IPv4 header,
-    /// so it can go through `ConnectionPool::accept`, which needs the IPv4
-    /// addresses (not just the TCP ports).
-    fn ip_frame(tcp_bytes: &[u8]) -> Vec<u8> {
-        use crate::net::ipv4::IPV4_PACKET;
-        use crate::net::ipv4::protocol::Protocol;
-        use crate::net::ipv4::ttl::TimeToLive;
-
-        let mut buffer = vec![0u8; IPV4_PACKET + tcp_bytes.len()];
-        {
-            let mut ip = IPv4Packet::new(buffer.as_mut_slice()).unwrap();
-            ip.set_version_and_length()
-                .set_packet_length(IPV4_PACKET + tcp_bytes.len())
-                .set_protocol(Protocol::TCP)
-                .set_destination(local())
-                .set_source(remote())
-                .set_ttl(TimeToLive::max())
-                .compute_checksum();
-            ip.payload_mut().copy_from_slice(tcp_bytes);
-        }
-        buffer
-    }
 }

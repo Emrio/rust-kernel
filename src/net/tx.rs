@@ -138,15 +138,6 @@ pub fn generate_dhcp_request_with_configuration(
     }
 }
 
-pub fn generate_ipv4(request_ipv4: &IPv4Packet<&[u8]>, protocol: Protocol, payload: Vec<u8>) -> L3 {
-    L3::IPv4 {
-        source: request_ipv4.destination(),
-        destination: request_ipv4.source(),
-        protocol,
-        next: L4::Buffer(payload),
-    }
-}
-
 pub(crate) enum L2 {
     Ethernet {
         source: EthernetAddress,
