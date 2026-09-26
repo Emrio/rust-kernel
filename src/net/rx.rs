@@ -132,11 +132,7 @@ pub(crate) fn process_ethernet_frame(
                     klog!("net_rx", "TCP packet: ", tcp);
 
                     if let Some(response) = tcp_pool.accept(&ipv4, &tcp) {
-                        Ok(ProcessingResult::Respond(tx::generate_ipv4(
-                            &ipv4,
-                            Protocol::TCP,
-                            response,
-                        )))
+                        Ok(ProcessingResult::Respond(response))
                     } else {
                         Ok(ProcessingResult::Nothing)
                     }

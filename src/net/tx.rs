@@ -223,6 +223,7 @@ impl<'a> L3Frame<'a> {
     }
 }
 
+#[derive(Debug)]
 pub(crate) enum L4 {
     Buffer(Vec<u8>),
     Udp {
@@ -280,7 +281,9 @@ impl<'a> L4Frame<'a> {
     }
 }
 
+#[derive(Debug)]
 pub(crate) enum L7 {
+    Empty,
     Buffer(Vec<u8>),
     Dhcp {
         operation: dhcp::operation::Operation,
@@ -293,6 +296,7 @@ pub(crate) enum L7 {
 impl L7 {
     fn size(&self) -> usize {
         match self {
+            Self::Empty => 0,
             Self::Buffer(buffer) => buffer.len(),
             Self::Dhcp { options, .. } => DHCP_HEADER + dhcp::option::options_to_vec(options).len(),
         }
@@ -357,6 +361,8 @@ pub(crate) fn build(l2: L2) -> Result<Vec<u8>, BufferTooSmall> {
             return Ok(packet);
         }
     };
+    let l3source = l3frame.source();
+    let l3destination = l3frame.destination();
 
     let l4size = l4.size();
     let (mut l4frame, l7) = match l4 {
@@ -391,8 +397,6 @@ pub(crate) fn build(l2: L2) -> Result<Vec<u8>, BufferTooSmall> {
             window,
             next,
         } => {
-            let l3source = l3frame.source();
-            let l3destination = l3frame.destination();
             let mut tcp = TCPPacket::new(l3frame.payload_mut())?;
             tcp.set_source(source)
                 .set_destination(destination)
@@ -407,8 +411,7 @@ pub(crate) fn build(l2: L2) -> Result<Vec<u8>, BufferTooSmall> {
                 .set_syn(syn)
                 .set_fin(fin)
                 .set_window(window)
-                .set_data_offset_and_reserved()
-                .compute_checksum(l3source, l3destination);
+                .set_data_offset_and_reserved();
             (L4Frame::Tcp(tcp), next)
         }
         L4::IcmpEcho {
@@ -424,6 +427,7 @@ pub(crate) fn build(l2: L2) -> Result<Vec<u8>, BufferTooSmall> {
     };
 
     match l7 {
+        L7::Empty => {}
         L7::Buffer(buffer) => l4frame.payload_mut().copy_from_slice(&buffer),
         L7::Dhcp {
             operation,
@@ -447,9 +451,15 @@ pub(crate) fn build(l2: L2) -> Result<Vec<u8>, BufferTooSmall> {
         }
     }
 
-    if let L4Frame::Icmp(mut icmppacket) = l4frame {
-        icmppacket.compute_checksum();
-    };
+    match l4frame {
+        L4Frame::Tcp(mut tcppacket) => {
+            tcppacket.compute_checksum(l3source, l3destination);
+        }
+        L4Frame::Icmp(mut icmppacket) => {
+            icmppacket.compute_checksum();
+        }
+        _ => {}
+    }
 
     Ok(packet)
 }

@@ -6,8 +6,10 @@ use alloc::vec::Vec;
 use crate::net::error::BufferTooSmall;
 use crate::net::ipv4::IPv4Packet;
 use crate::net::ipv4::address::IPv4Address;
+use crate::net::ipv4::protocol::Protocol;
 use crate::net::tcp::sequence::Sequence;
 use crate::net::tcp::{TCP_HEADER, TCPPacket};
+use crate::net::tx::{L3, L4, L7};
 use crate::print::colors::Colorable;
 
 const MY_WINDOW: usize = 4096;
@@ -34,11 +36,11 @@ pub struct TransmissionControlBlock {
 pub struct Id(pub IPv4Address, pub u16, pub IPv4Address, pub u16);
 
 #[derive(Debug, Default)]
-pub struct AcceptResult {
+pub(crate) struct AcceptResult {
     pub established: bool,
     pub destroyed: bool,
     pub peer_closed: bool,
-    pub response: Option<Vec<u8>>,
+    pub response: Option<L4>,
     pub received: Option<Vec<u8>>,
 }
 
@@ -97,60 +99,67 @@ impl TransmissionControlBlock {
         )
     }
 
-    fn generate_syn_ack(&self) -> Result<Vec<u8>, BufferTooSmall> {
-        let mut buffer = vec![0; TCP_HEADER];
-        let mut packet = TCPPacket::new(&mut buffer)?;
-
-        packet
-            .set_source(self.local_port)
-            .set_destination(self.remote_port)
-            .set_sequence(self.iss)
-            .set_acknowledgment(self.rcv_nxt)
-            .set_syn(true)
-            .set_ack(true)
-            .set_data_offset_and_reserved()
-            .set_window(MY_WINDOW as u16)
-            .compute_checksum(self.local_address, self.remote_address);
-
-        Ok(buffer)
+    fn generate_syn_ack(&self) -> L4 {
+        L4::Tcp {
+            source: self.local_port,
+            destination: self.remote_port,
+            sequence: self.iss,
+            acknowledgment: self.rcv_nxt,
+            cwr: false,
+            ece: false,
+            urg: false,
+            ack: true,
+            psh: false,
+            rst: false,
+            syn: true,
+            fin: false,
+            window: MY_WINDOW as u16,
+            next: L7::Empty,
+        }
     }
 
-    fn generate_ack(&self) -> Result<Vec<u8>, BufferTooSmall> {
-        let mut buffer = vec![0; TCP_HEADER];
-        let mut packet = TCPPacket::new(&mut buffer)?;
-
-        packet
-            .set_source(self.local_port)
-            .set_destination(self.remote_port)
-            .set_sequence(self.snd_nxt)
-            .set_acknowledgment(self.rcv_nxt)
-            .set_ack(true)
-            .set_data_offset_and_reserved()
-            .set_window(MY_WINDOW as u16)
-            .compute_checksum(self.local_address, self.remote_address);
-
-        Ok(buffer)
+    fn generate_ack(&self) -> L4 {
+        L4::Tcp {
+            source: self.local_port,
+            destination: self.remote_port,
+            sequence: self.snd_nxt,
+            acknowledgment: self.rcv_nxt,
+            cwr: false,
+            ece: false,
+            urg: false,
+            ack: true,
+            psh: false,
+            rst: false,
+            syn: false,
+            fin: false,
+            window: MY_WINDOW as u16,
+            next: L7::Empty,
+        }
     }
 
-    fn generate_fin(&self) -> Result<Vec<u8>, BufferTooSmall> {
-        let mut buffer = vec![0; TCP_HEADER];
-        let mut packet = TCPPacket::new(&mut buffer)?;
-
-        packet
-            .set_source(self.local_port)
-            .set_destination(self.remote_port)
-            .set_sequence(self.snd_nxt)
-            .set_acknowledgment(self.rcv_nxt)
-            .set_ack(true)
-            .set_fin(true)
-            .set_data_offset_and_reserved()
-            .set_window(MY_WINDOW as u16)
-            .compute_checksum(self.local_address, self.remote_address);
-
-        Ok(buffer)
+    fn generate_fin(&self) -> L4 {
+        L4::Tcp {
+            source: self.local_port,
+            destination: self.remote_port,
+            sequence: self.snd_nxt,
+            acknowledgment: self.rcv_nxt,
+            cwr: false,
+            ece: false,
+            urg: false,
+            ack: true,
+            psh: false,
+            rst: false,
+            syn: false,
+            fin: true,
+            window: MY_WINDOW as u16,
+            next: L7::Empty,
+        }
     }
 
-    pub fn accept(&mut self, packet: &TCPPacket<&[u8]>) -> Result<AcceptResult, BufferTooSmall> {
+    pub(crate) fn accept(
+        &mut self,
+        packet: &TCPPacket<&[u8]>,
+    ) -> Result<AcceptResult, BufferTooSmall> {
         if packet.rst() {
             klog!(serv!(self), "Received ", "RST".red());
             self.state = State::Closed;
@@ -169,7 +178,7 @@ impl TransmissionControlBlock {
             self.snd_una = self.iss;
             self.snd_nxt = self.iss + 1;
             return Ok(AcceptResult {
-                response: Some(self.generate_syn_ack()?),
+                response: Some(self.generate_syn_ack()),
                 ..Default::default()
             });
         }
@@ -204,7 +213,7 @@ impl TransmissionControlBlock {
             self.state = State::Closed;
             self.rcv_nxt += 1;
             return Ok(AcceptResult {
-                response: Some(self.generate_ack()?),
+                response: Some(self.generate_ack()),
                 peer_closed: true,
                 destroyed: true,
                 ..Default::default()
@@ -216,7 +225,7 @@ impl TransmissionControlBlock {
             self.state = State::Closing;
             self.rcv_nxt += 1;
             return Ok(AcceptResult {
-                response: Some(self.generate_ack()?),
+                response: Some(self.generate_ack()),
                 peer_closed: true,
                 ..Default::default()
             });
@@ -234,7 +243,7 @@ impl TransmissionControlBlock {
             self.state = State::Closed;
             self.rcv_nxt += 1;
             return Ok(AcceptResult {
-                response: Some(self.generate_ack()?),
+                response: Some(self.generate_ack()),
                 peer_closed: true,
                 destroyed: true,
                 ..Default::default()
@@ -287,7 +296,7 @@ impl TransmissionControlBlock {
 
         Ok(AcceptResult {
             response: if generated_ack {
-                Some(self.generate_ack()?)
+                Some(self.generate_ack())
             } else {
                 None
             },
@@ -297,8 +306,8 @@ impl TransmissionControlBlock {
         })
     }
 
-    pub fn close(&mut self) -> Result<Option<Vec<u8>>, BufferTooSmall> {
-        let response = self.generate_fin()?;
+    pub(crate) fn close(&mut self) -> Result<Option<L4>, BufferTooSmall> {
+        let response = self.generate_fin();
         self.snd_nxt += 1;
 
         self.state = match self.state {
@@ -338,32 +347,40 @@ impl From<Id> for TransmissionControlBlock {
     }
 }
 
-pub fn generate_rst(ip: &IPv4Packet<&[u8]>, tcp: &TCPPacket<&[u8]>) -> Option<Vec<u8>> {
+pub(crate) fn generate_rst(ip: &IPv4Packet<&[u8]>, tcp: &TCPPacket<&[u8]>) -> Option<L3> {
     if tcp.rst() {
         return None;
     }
 
-    let mut buffer = vec![0; TCP_HEADER];
-    let mut packet = TCPPacket::new(&mut buffer).expect("buffer is not too small");
-
-    packet
-        .set_source(tcp.destination())
-        .set_destination(tcp.source())
-        .set_rst(true)
-        .set_data_offset_and_reserved();
-
-    if tcp.ack() {
-        packet.set_sequence(tcp.acknowledgment());
-    } else {
-        packet
-            .set_sequence(0.into())
-            .set_acknowledgment(tcp.sequence() + tcp.payload().len() as u32)
-            .set_ack(true);
-    }
-
-    packet.compute_checksum(ip.destination(), ip.source());
-
-    Some(buffer)
+    Some(L3::IPv4 {
+        source: ip.destination(),
+        destination: ip.source(),
+        protocol: Protocol::TCP,
+        next: L4::Tcp {
+            source: tcp.destination(),
+            destination: tcp.source(),
+            sequence: if tcp.ack() {
+                tcp.acknowledgment()
+            } else {
+                0.into()
+            },
+            acknowledgment: if tcp.ack() {
+                0.into()
+            } else {
+                tcp.sequence() + tcp.payload().len() as u32
+            },
+            cwr: false,
+            ece: false,
+            urg: false,
+            ack: !tcp.ack(),
+            psh: false,
+            rst: true,
+            syn: false,
+            fin: false,
+            window: 0,
+            next: L7::Empty,
+        },
+    })
 }
 
 #[cfg(test)]
@@ -438,12 +455,20 @@ mod tests {
             .unwrap()
             .response
             .expect("expected a SYN-ACK");
-        let response = TCPPacket::new(response.as_slice()).unwrap();
+        let L4::Tcp {
+            syn: syn_flag,
+            ack,
+            acknowledgment,
+            ..
+        } = response
+        else {
+            panic!("expected a TCP segment")
+        };
 
         assert_eq!(tcb.state, State::SynReceived);
-        assert!(response.syn());
-        assert!(response.ack());
-        assert_eq!(response.acknowledgment(), Sequence::from(1001));
+        assert!(syn_flag);
+        assert!(ack);
+        assert_eq!(acknowledgment, Sequence::from(1001));
         assert_eq!(tcb.rcv_nxt, Sequence::from(1001));
     }
 
@@ -499,12 +524,13 @@ mod tests {
         let result = tcb
             .accept(&TCPPacket::new(data.as_slice()).unwrap())
             .unwrap();
-        let response = result.response.clone().expect("expected an ACK");
-        let response = TCPPacket::new(response.as_slice()).unwrap();
+        let L4::Tcp { acknowledgment, .. } = result.response.expect("expected an ACK") else {
+            panic!("expected a TCP segment")
+        };
 
         assert_eq!(result.received.as_deref(), Some(b"hello".as_slice()));
         assert_eq!(tcb.rcv_nxt, Sequence::from(rcv_nxt_before + 5));
-        assert_eq!(response.acknowledgment(), tcb.rcv_nxt);
+        assert_eq!(acknowledgment, tcb.rcv_nxt);
     }
 
     #[test_case]
@@ -533,16 +559,17 @@ mod tests {
             .unwrap();
         let response = second
             .response
-            .clone()
             .expect("a duplicate segment should still be met with a duplicate ACK");
-        let response = TCPPacket::new(response.as_slice()).unwrap();
+        let L4::Tcp { acknowledgment, .. } = response else {
+            panic!("expected a TCP segment")
+        };
 
         assert!(
             second.received.is_none(),
             "duplicate data must not be delivered twice to the application"
         );
         assert_eq!(tcb.rcv_nxt, rcv_nxt_after_first);
-        assert_eq!(response.acknowledgment(), tcb.rcv_nxt);
+        assert_eq!(acknowledgment, tcb.rcv_nxt);
     }
 
     #[test_case]
@@ -588,20 +615,26 @@ mod tests {
         let result = tcb
             .accept(&TCPPacket::new(fin_with_data.as_slice()).unwrap())
             .unwrap();
-        let response = result.response.clone().expect("expected an ACK");
-        let response = TCPPacket::new(response.as_slice()).unwrap();
+        let L4::Tcp {
+            acknowledgment,
+            fin: fin_flag,
+            ..
+        } = result.response.expect("expected an ACK")
+        else {
+            panic!("expected a TCP segment")
+        };
 
         // 3 bytes of data + 1 for the FIN itself.
         assert_eq!(tcb.rcv_nxt, Sequence::from(rcv_nxt_before + 4));
         assert_eq!(result.received.as_deref(), Some(payload));
         assert!(result.peer_closed);
-        assert_eq!(response.acknowledgment(), tcb.rcv_nxt);
+        assert_eq!(acknowledgment, tcb.rcv_nxt);
 
         // Receiving a FIN only closes the read side (half-close): we must
         // NOT send our own FIN yet, only once the application calls
         // `close()` (see `passive_close_full_lifecycle`).
         assert_eq!(tcb.state, State::CloseWait);
-        assert!(!response.fin());
+        assert!(!fin_flag);
     }
 
     #[test_case]
@@ -631,16 +664,21 @@ mod tests {
         let snd_nxt_before: u32 = tcb.snd_nxt.into();
 
         let response = tcb.close().unwrap().expect("expected a FIN");
-        let response = TCPPacket::new(response.as_slice()).unwrap();
+        let L4::Tcp {
+            fin, ack, sequence, ..
+        } = response
+        else {
+            panic!("expected a TCP segment")
+        };
 
         assert_eq!(tcb.state, State::LastAck);
         assert_eq!(tcb.snd_nxt, Sequence::from(snd_nxt_before + 1));
-        assert!(response.fin());
+        assert!(fin);
         assert!(
-            response.ack(),
+            ack,
             "a FIN without ACK gets silently dropped by real TCP stacks"
         );
-        assert_eq!(response.sequence(), Sequence::from(snd_nxt_before));
+        assert_eq!(sequence, Sequence::from(snd_nxt_before));
     }
 
     #[test_case]
@@ -699,14 +737,16 @@ mod tests {
 
         // The application only decides to close afterwards.
         let our_fin = tcb.close().unwrap().expect("expected our own FIN");
-        let our_fin = TCPPacket::new(our_fin.as_slice()).unwrap();
+        let L4::Tcp { fin, ack, .. } = our_fin else {
+            panic!("expected a TCP segment")
+        };
         assert_eq!(
             tcb.state,
             State::LastAck,
             "closing from CloseWait must move to LastAck, not stay stuck in CloseWait"
         );
-        assert!(our_fin.fin());
-        assert!(our_fin.ack());
+        assert!(fin);
+        assert!(ack);
 
         // Peer ACKs our FIN.
         let final_ack = segment(
@@ -738,10 +778,14 @@ mod tests {
 
         // We close first.
         let our_fin = tcb.close().unwrap().expect("expected our own FIN");
-        let our_fin_seq: u32 = TCPPacket::new(our_fin.as_slice())
-            .unwrap()
-            .sequence()
-            .into();
+        let L4::Tcp {
+            sequence: our_fin_seq,
+            ..
+        } = our_fin
+        else {
+            panic!("expected a TCP segment")
+        };
+        let our_fin_seq: u32 = our_fin_seq.into();
         assert_eq!(tcb.state, State::FinWait1);
 
         // Peer ACKs our FIN (no FIN of their own yet).
@@ -762,7 +806,15 @@ mod tests {
 
         // Peer now sends its own FIN.
         let rcv_nxt_before: u32 = tcb.rcv_nxt.into();
-        let peer_fin = segment(rcv_nxt_before, our_fin_seq + 1, false, true, true, false, &[]);
+        let peer_fin = segment(
+            rcv_nxt_before,
+            our_fin_seq + 1,
+            false,
+            true,
+            true,
+            false,
+            &[],
+        );
         let result = tcb
             .accept(&TCPPacket::new(peer_fin.as_slice()).unwrap())
             .unwrap();
@@ -772,9 +824,11 @@ mod tests {
         let response = result
             .response
             .expect("the ACK for the peer's FIN must be sent, not stashed in `received`");
-        let response = TCPPacket::new(response.as_slice()).unwrap();
+        let L4::Tcp { acknowledgment, .. } = response else {
+            panic!("expected a TCP segment")
+        };
         assert_eq!(
-            response.acknowledgment(),
+            acknowledgment,
             Sequence::from(rcv_nxt_before + 1),
             "a FIN consumes one sequence number: the ACK must cover seq+1, not seq, \
              or the peer will consider its FIN unacknowledged and retransmit it"
@@ -791,10 +845,14 @@ mod tests {
         let mut tcb = established_tcb();
 
         let our_fin = tcb.close().unwrap().expect("expected our own FIN");
-        let our_fin_seq: u32 = TCPPacket::new(our_fin.as_slice())
-            .unwrap()
-            .sequence()
-            .into();
+        let L4::Tcp {
+            sequence: our_fin_seq,
+            ..
+        } = our_fin
+        else {
+            panic!("expected a TCP segment")
+        };
+        let our_fin_seq: u32 = our_fin_seq.into();
         assert_eq!(tcb.state, State::FinWait1);
 
         // Peer's FIN crosses ours on the wire, before ACKing ours.

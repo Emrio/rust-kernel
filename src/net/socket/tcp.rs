@@ -20,6 +20,7 @@ use crate::net::tcp::TCPPacket;
 use crate::net::tcp::protocol::AcceptResult;
 use crate::net::tcp::protocol::{Id, TransmissionControlBlock, generate_rst};
 use crate::net::tx;
+use crate::net::tx::L3;
 use crate::net::tx::L4;
 use crate::net::tx::NetworkError;
 use crate::print::colors::Colorable;
@@ -216,7 +217,7 @@ async fn close(id: Id) -> Result<(), NetworkError> {
         source: id.0,
         destination: id.2,
         protocol: Protocol::TCP,
-        next: L4::Buffer(segment),
+        next: segment,
     })
     .await
 }
@@ -297,7 +298,7 @@ impl ConnectionPool {
         self.connections.get_mut(&id)
     }
 
-    fn process_result(&mut self, id: Id, result: AcceptResult) -> Option<Vec<u8>> {
+    fn process_result(&mut self, id: Id, result: AcceptResult) -> Option<L4> {
         let Some(connection) = self.connections.remove(&id) else {
             // this is bad news
             return None;
@@ -349,7 +350,7 @@ impl ConnectionPool {
         result.response
     }
 
-    pub fn accept(&mut self, ip: &IPv4Packet<&[u8]>, tcp: &TCPPacket<&[u8]>) -> Option<Vec<u8>> {
+    pub(crate) fn accept(&mut self, ip: &IPv4Packet<&[u8]>, tcp: &TCPPacket<&[u8]>) -> Option<L3> {
         let Some(connection) = self.get_connection(ip, tcp) else {
             klog!(
                 format_args!(
@@ -371,7 +372,12 @@ impl ConnectionPool {
             .expect("buffer should not be too small");
 
         let id = connection.tcb().id();
-        self.process_result(id, result)
+        self.process_result(id, result).map(|next| L3::IPv4 {
+            source: ip.destination(),
+            destination: ip.source(),
+            protocol: Protocol::TCP,
+            next,
+        })
     }
 }
 
@@ -415,12 +421,12 @@ pub async fn handle_pending_closes() {
 
 #[cfg(test)]
 mod tests {
-    use alloc::vec;
     use super::*;
     use crate::net::ipv4::IPV4_PACKET;
     use crate::net::ipv4::ttl::TimeToLive;
     use crate::net::tcp::TCP_HEADER;
     use crate::net::tcp::sequence::Sequence;
+    use alloc::vec;
 
     fn local() -> IPv4Address {
         IPv4Address::new(10, 0, 0, 1)
@@ -514,11 +520,16 @@ mod tests {
         let tcp = TCPPacket::new(ip.payload()).unwrap();
 
         let response = pool.accept(&ip, &tcp).expect("expected a RST");
-        let response = TCPPacket::new(response.as_slice()).unwrap();
+        let L3::IPv4 { next, .. } = response else {
+            panic!("expected an IPv4 response")
+        };
+        let L4::Tcp { rst, sequence, .. } = next else {
+            panic!("expected a TCP segment")
+        };
 
-        assert!(response.rst());
+        assert!(rst);
         assert_eq!(
-            response.sequence(),
+            sequence,
             Sequence::from(5000),
             "RFC 793: when the offending segment has ACK set, the RST's sequence \
              number must equal that ACK value, or real stacks treat the RST as \
@@ -539,15 +550,24 @@ mod tests {
         let tcp = TCPPacket::new(ip.payload()).unwrap();
 
         let response = pool.accept(&ip, &tcp).expect("expected a RST");
-        let response = TCPPacket::new(response.as_slice()).unwrap();
+        let L3::IPv4 { next, .. } = response else {
+            panic!("expected an IPv4 response")
+        };
+        let L4::Tcp {
+            rst,
+            ack,
+            sequence,
+            acknowledgment,
+            ..
+        } = next
+        else {
+            panic!("expected a TCP segment")
+        };
 
-        assert!(response.rst());
-        assert!(response.ack());
-        assert_eq!(response.sequence(), Sequence::from(0));
-        assert_eq!(
-            response.acknowledgment(),
-            Sequence::from(2000 + payload.len() as u32)
-        );
+        assert!(rst);
+        assert!(ack);
+        assert_eq!(sequence, Sequence::from(0));
+        assert_eq!(acknowledgment, Sequence::from(2000 + payload.len() as u32));
     }
 
     #[test_case]
@@ -579,9 +599,14 @@ mod tests {
         let tcp = TCPPacket::new(ip.payload()).unwrap();
 
         let response = pool.accept(&ip, &tcp).expect("expected a RST");
-        let response = TCPPacket::new(response.as_slice()).unwrap();
+        let L3::IPv4 { next, .. } = response else {
+            panic!("expected an IPv4 response")
+        };
+        let L4::Tcp { rst, .. } = next else {
+            panic!("expected a TCP segment")
+        };
 
-        assert!(response.rst());
+        assert!(rst);
         assert!(pool.connections.is_empty());
     }
 
@@ -595,11 +620,22 @@ mod tests {
         let tcp = TCPPacket::new(ip.payload()).unwrap();
 
         let response = pool.accept(&ip, &tcp).expect("expected a SYN-ACK");
-        let response = TCPPacket::new(response.as_slice()).unwrap();
+        let L3::IPv4 { next, .. } = response else {
+            panic!("expected an IPv4 response")
+        };
+        let L4::Tcp {
+            syn,
+            ack,
+            acknowledgment,
+            ..
+        } = next
+        else {
+            panic!("expected a TCP segment")
+        };
 
-        assert!(response.syn());
-        assert!(response.ack());
-        assert_eq!(response.acknowledgment(), Sequence::from(1001));
+        assert!(syn);
+        assert!(ack);
+        assert_eq!(acknowledgment, Sequence::from(1001));
         assert_eq!(pool.connections.len(), 1);
     }
 }
