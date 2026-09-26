@@ -5,12 +5,10 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::task::Poll;
 
-use crate::drivers::i82540em::DEVICE;
 use crate::net::handle::Handle;
 use crate::net::ipv4::IPv4Packet;
 use crate::net::ipv4::address::IPv4Address;
 use crate::net::ipv4::protocol::Protocol;
-use crate::net::rx::NetContext;
 use crate::net::socket::listen::Listen;
 use crate::net::tx::{L3, L4, L7, NetworkError};
 use crate::net::udp::UDPPacket;
