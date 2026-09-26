@@ -48,7 +48,19 @@ pub enum State {
     Established,
     CloseWait,
     LastAck,
+    FinWait1,
+    FinWait2,
+    Closing,
     Closed,
+}
+
+macro_rules! serv {
+    ($a:expr) => {
+        format_args!(
+            "tcp/{}/{}/{}/{}",
+            $a.local_address, $a.local_port, $a.remote_address, $a.remote_port
+        )
+    };
 }
 
 impl TransmissionControlBlock {
@@ -139,14 +151,7 @@ impl TransmissionControlBlock {
 
     pub fn accept(&mut self, packet: &TCPPacket<&[u8]>) -> Result<AcceptResult, BufferTooSmall> {
         if packet.rst() {
-            klog!(
-                format_args!(
-                    "tcp/{}/{}/{}/{}",
-                    self.local_address, self.local_port, self.remote_address, self.remote_port
-                ),
-                "Received ",
-                "RST".red()
-            );
+            klog!(serv!(self), "Received ", "RST".red());
             self.state = State::Closed;
             return Ok(AcceptResult {
                 destroyed: true,
@@ -155,14 +160,7 @@ impl TransmissionControlBlock {
         }
 
         if self.state == State::Listen && packet.syn() {
-            klog!(
-                format_args!(
-                    "tcp/{}/{}/{}/{}",
-                    self.local_address, self.local_port, self.remote_address, self.remote_port
-                ),
-                "Received ",
-                "SYN".green()
-            );
+            klog!(serv!(self), "Received ", "SYN".green());
             self.state = State::SynReceived;
             self.irs = packet.sequence();
             self.iss = Sequence::random();
@@ -179,13 +177,7 @@ impl TransmissionControlBlock {
             && packet.ack()
             && packet.acknowledgment() == self.snd_nxt
         {
-            klog!(
-                format_args!(
-                    "tcp/{}/{}/{}/{}",
-                    self.local_address, self.local_port, self.remote_address, self.remote_port
-                ),
-                "Connection established"
-            );
+            klog!(serv!(self), "Connection established");
             self.state = State::Established;
             return Ok(AcceptResult {
                 established: true,
@@ -194,15 +186,52 @@ impl TransmissionControlBlock {
         }
 
         if self.state == State::LastAck && packet.ack() && packet.acknowledgment() == self.snd_nxt {
-            klog!(
-                format_args!(
-                    "tcp/{}/{}/{}/{}",
-                    self.local_address, self.local_port, self.remote_address, self.remote_port
-                ),
-                "Connection closed"
-            );
+            klog!(serv!(self), "Connection closed (LastAck)");
             self.state = State::Closed;
             return Ok(AcceptResult {
+                destroyed: true,
+                ..Default::default()
+            });
+        }
+
+        if self.state == State::FinWait1
+            && packet.fin()
+            && packet.ack()
+            && packet.acknowledgment() == self.snd_nxt
+        {
+            klog!(serv!(self), "Connection closed (FinWait1)");
+            self.state = State::Closed;
+            self.rcv_nxt += 1;
+            return Ok(AcceptResult {
+                response: Some(self.generate_ack()?),
+                destroyed: true,
+                ..Default::default()
+            });
+        }
+
+        if self.state == State::FinWait1 && packet.fin() {
+            klog!(serv!(self), "FinWait1 -> Closing");
+            self.state = State::Closing;
+            self.rcv_nxt += 1;
+            return Ok(AcceptResult {
+                response: Some(self.generate_ack()?),
+                ..Default::default()
+            });
+        }
+
+        if self.state == State::FinWait1 && packet.ack() && packet.acknowledgment() == self.snd_nxt
+        {
+            klog!(serv!(self), "FinWait1 -> FinWait2");
+            self.state = State::FinWait2;
+            return Ok(AcceptResult::default());
+        }
+
+        if self.state == State::FinWait2 && packet.fin() {
+            klog!(serv!(self), "Connection closed (FinWait2)");
+            self.state = State::Closed;
+            self.rcv_nxt += 1;
+            return Ok(AcceptResult {
+                response: Some(self.generate_ack()?),
                 destroyed: true,
                 ..Default::default()
             });
@@ -213,14 +242,13 @@ impl TransmissionControlBlock {
         }
 
         let mut received = None;
+        let mut generated_ack = false;
 
         if !packet.payload().is_empty() {
+            generated_ack = true;
             if packet.sequence() == self.rcv_nxt {
                 klog!(
-                    format_args!(
-                        "tcp/{}/{}/{}/{}",
-                        self.local_address, self.local_port, self.remote_address, self.remote_port
-                    ),
+                    serv!(self),
                     "Received ",
                     packet.payload().len().yellow(),
                     " bytes"
@@ -235,26 +263,17 @@ impl TransmissionControlBlock {
         }
 
         if packet.fin() && packet.sequence() + packet.payload().len() as u32 == self.rcv_nxt {
-            klog!(
-                format_args!(
-                    "tcp/{}/{}/{}/{}",
-                    self.local_address, self.local_port, self.remote_address, self.remote_port
-                ),
-                "Received ",
-                "FIN".bright_red()
-            );
+            klog!(serv!(self), "Received ", "FIN".bright_red());
             self.state = State::CloseWait;
             self.rcv_nxt += 1;
-            // TEMPORARY:
-            return Ok(AcceptResult {
-                response: self.close()?,
-                received,
-                ..Default::default()
-            });
         }
 
         Ok(AcceptResult {
-            response: Some(self.generate_ack()?),
+            response: if generated_ack {
+                Some(self.generate_ack()?)
+            } else {
+                None
+            },
             received,
             ..Default::default()
         })
@@ -262,9 +281,13 @@ impl TransmissionControlBlock {
 
     pub fn close(&mut self) -> Result<Option<Vec<u8>>, BufferTooSmall> {
         let response = self.generate_fin()?;
-
         self.snd_nxt += 1;
-        self.state = State::LastAck;
+
+        self.state = match self.state {
+            State::SynReceived | State::Established => State::FinWait1,
+            State::Listen | State::Closed => State::Closed,
+            state => state,
+        };
 
         Ok(Some(response))
     }
