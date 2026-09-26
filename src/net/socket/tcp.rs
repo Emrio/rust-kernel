@@ -412,3 +412,194 @@ pub async fn handle_pending_closes() {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec;
+    use super::*;
+    use crate::net::ipv4::IPV4_PACKET;
+    use crate::net::ipv4::ttl::TimeToLive;
+    use crate::net::tcp::TCP_HEADER;
+    use crate::net::tcp::sequence::Sequence;
+
+    fn local() -> IPv4Address {
+        IPv4Address::new(10, 0, 0, 1)
+    }
+    const LOCAL_PORT: u16 = 4242;
+    fn remote() -> IPv4Address {
+        IPv4Address::new(10, 0, 0, 2)
+    }
+    const REMOTE_PORT: u16 = 1234;
+
+    /// Builds a raw incoming TCP segment (as the remote peer would send it).
+    #[allow(clippy::too_many_arguments)]
+    fn segment(
+        seq: u32,
+        ack: u32,
+        syn: bool,
+        ack_flag: bool,
+        fin: bool,
+        rst: bool,
+        payload: &[u8],
+    ) -> Vec<u8> {
+        let mut buffer = vec![0u8; TCP_HEADER + payload.len()];
+        {
+            let mut packet = TCPPacket::new(buffer.as_mut_slice()).unwrap();
+            packet
+                .set_source(REMOTE_PORT)
+                .set_destination(LOCAL_PORT)
+                .set_sequence(seq.into())
+                .set_acknowledgment(ack.into())
+                .set_syn(syn)
+                .set_ack(ack_flag)
+                .set_fin(fin)
+                .set_rst(rst)
+                .set_data_offset_and_reserved();
+            packet.payload_mut().copy_from_slice(payload);
+        }
+        buffer
+    }
+
+    /// Wraps a raw TCP segment in an IPv4 header, as needed by `ConnectionPool::accept`.
+    fn ip_frame(tcp_bytes: &[u8]) -> Vec<u8> {
+        let mut buffer = vec![0u8; IPV4_PACKET + tcp_bytes.len()];
+        {
+            let mut ip = IPv4Packet::new(buffer.as_mut_slice()).unwrap();
+            ip.set_version_and_length()
+                .set_packet_length(IPV4_PACKET + tcp_bytes.len())
+                .set_protocol(Protocol::TCP)
+                .set_destination(local())
+                .set_source(remote())
+                .set_ttl(TimeToLive::max())
+                .compute_checksum();
+            ip.payload_mut().copy_from_slice(tcp_bytes);
+        }
+        buffer
+    }
+
+    fn listening_pool() -> ConnectionPool {
+        let mut pool = ConnectionPool::default();
+        pool.listen(Listen::AnyAddress(LOCAL_PORT), Arc::new(Handle::new(16)));
+        pool
+    }
+
+    #[test_case]
+    fn stray_non_syn_segment_does_not_create_a_zombie_connection() {
+        let mut pool = listening_pool();
+
+        // A stray ACK for a connection we never saw a SYN for (e.g. a late
+        // retransmission from a connection that predates us listening).
+        let tcp_bytes = segment(1000, 5000, false, true, false, false, &[]);
+        let ip_bytes = ip_frame(&tcp_bytes);
+        let ip = IPv4Packet::new(ip_bytes.as_slice()).unwrap();
+        let tcp = TCPPacket::new(ip.payload()).unwrap();
+
+        pool.accept(&ip, &tcp);
+
+        assert!(
+            pool.connections.is_empty(),
+            "a non-SYN segment for an unknown connection must not spawn a zombie TCB"
+        );
+    }
+
+    #[test_case]
+    fn rst_reply_to_ack_segment_uses_incoming_ack_as_sequence() {
+        let mut pool = listening_pool();
+
+        // Exactly like the stray retransmitted ACK+PSH+FIN observed in the wild:
+        // no SYN was ever seen for this connection.
+        let tcp_bytes = segment(1000, 5000, false, true, true, false, b"stray!!");
+        let ip_bytes = ip_frame(&tcp_bytes);
+        let ip = IPv4Packet::new(ip_bytes.as_slice()).unwrap();
+        let tcp = TCPPacket::new(ip.payload()).unwrap();
+
+        let response = pool.accept(&ip, &tcp).expect("expected a RST");
+        let response = TCPPacket::new(response.as_slice()).unwrap();
+
+        assert!(response.rst());
+        assert_eq!(
+            response.sequence(),
+            Sequence::from(5000),
+            "RFC 793: when the offending segment has ACK set, the RST's sequence \
+             number must equal that ACK value, or real stacks treat the RST as \
+             out-of-window and silently ignore it"
+        );
+    }
+
+    #[test_case]
+    fn rst_reply_to_segment_without_ack_computes_sequence_and_ack() {
+        let mut pool = listening_pool();
+
+        // A bare FIN with no ACK and no matching connection: unusual, but
+        // covered by RFC 793's reset-generation rules.
+        let payload: &[u8] = b"abc";
+        let tcp_bytes = segment(2000, 0, false, false, true, false, payload);
+        let ip_bytes = ip_frame(&tcp_bytes);
+        let ip = IPv4Packet::new(ip_bytes.as_slice()).unwrap();
+        let tcp = TCPPacket::new(ip.payload()).unwrap();
+
+        let response = pool.accept(&ip, &tcp).expect("expected a RST");
+        let response = TCPPacket::new(response.as_slice()).unwrap();
+
+        assert!(response.rst());
+        assert!(response.ack());
+        assert_eq!(response.sequence(), Sequence::from(0));
+        assert_eq!(
+            response.acknowledgment(),
+            Sequence::from(2000 + payload.len() as u32)
+        );
+    }
+
+    #[test_case]
+    fn no_rst_sent_in_reply_to_an_incoming_rst() {
+        let mut pool = listening_pool();
+
+        let tcp_bytes = segment(3000, 0, false, false, false, true, &[]);
+        let ip_bytes = ip_frame(&tcp_bytes);
+        let ip = IPv4Packet::new(ip_bytes.as_slice()).unwrap();
+        let tcp = TCPPacket::new(ip.payload()).unwrap();
+
+        let response = pool.accept(&ip, &tcp);
+
+        assert!(
+            response.is_none(),
+            "replying to an unmatched RST with another RST risks a reset storm \
+             between two confused peers"
+        );
+    }
+
+    #[test_case]
+    fn syn_to_unlistened_port_is_met_with_rst() {
+        let mut pool = ConnectionPool::default();
+        // No listener registered at all.
+
+        let tcp_bytes = segment(1000, 0, true, false, false, false, &[]);
+        let ip_bytes = ip_frame(&tcp_bytes);
+        let ip = IPv4Packet::new(ip_bytes.as_slice()).unwrap();
+        let tcp = TCPPacket::new(ip.payload()).unwrap();
+
+        let response = pool.accept(&ip, &tcp).expect("expected a RST");
+        let response = TCPPacket::new(response.as_slice()).unwrap();
+
+        assert!(response.rst());
+        assert!(pool.connections.is_empty());
+    }
+
+    #[test_case]
+    fn syn_with_matching_listener_creates_half_open_connection_and_replies_syn_ack() {
+        let mut pool = listening_pool();
+
+        let tcp_bytes = segment(1000, 0, true, false, false, false, &[]);
+        let ip_bytes = ip_frame(&tcp_bytes);
+        let ip = IPv4Packet::new(ip_bytes.as_slice()).unwrap();
+        let tcp = TCPPacket::new(ip.payload()).unwrap();
+
+        let response = pool.accept(&ip, &tcp).expect("expected a SYN-ACK");
+        let response = TCPPacket::new(response.as_slice()).unwrap();
+
+        assert!(response.syn());
+        assert!(response.ack());
+        assert_eq!(response.acknowledgment(), Sequence::from(1001));
+        assert_eq!(pool.connections.len(), 1);
+    }
+}

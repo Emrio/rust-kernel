@@ -571,7 +571,7 @@ mod tests {
     }
 
     #[test_case]
-    fn fin_with_trailing_data_advances_past_both() {
+    fn fin_with_trailing_data_moves_to_close_wait_and_acks_both() {
         let mut tcb = established_tcb();
         let rcv_nxt_before: u32 = tcb.rcv_nxt.into();
         let payload: &[u8] = b"bye";
@@ -588,20 +588,20 @@ mod tests {
         let result = tcb
             .accept(&TCPPacket::new(fin_with_data.as_slice()).unwrap())
             .unwrap();
-        let response = result.response.clone().expect("expected a response");
+        let response = result.response.clone().expect("expected an ACK");
         let response = TCPPacket::new(response.as_slice()).unwrap();
 
         // 3 bytes of data + 1 for the FIN itself.
         assert_eq!(tcb.rcv_nxt, Sequence::from(rcv_nxt_before + 4));
         assert_eq!(result.received.as_deref(), Some(payload));
+        assert!(result.peer_closed);
         assert_eq!(response.acknowledgment(), tcb.rcv_nxt);
 
-        // `accept` currently auto-closes as soon as a valid FIN is processed
-        // (see the `// TEMPORARY` in `accept`), so we land straight in
-        // `LastAck` with our own FIN+ACK as the response.
-        assert_eq!(tcb.state, State::LastAck);
-        assert!(response.fin());
-        assert!(response.ack());
+        // Receiving a FIN only closes the read side (half-close): we must
+        // NOT send our own FIN yet, only once the application calls
+        // `close()` (see `passive_close_full_lifecycle`).
+        assert_eq!(tcb.state, State::CloseWait);
+        assert!(!response.fin());
     }
 
     #[test_case]
@@ -665,6 +665,167 @@ mod tests {
 
         assert_eq!(tcb.state, State::Closed);
         assert!(result.response.is_none());
+    }
+
+    /// Regression test for the real `nc` session traced by hand: the peer
+    /// closes first, we only ACK it (no FIN of our own -- `CloseWait` must
+    /// not auto-close, see `fin_with_trailing_data_moves_to_close_wait_and_acks_both`),
+    /// the application then calls `close()`, and only then do we land in
+    /// `Closed` once the peer ACKs our FIN. This used to get stuck forever
+    /// in `CloseWait` because `close()`'s state transition forgot that case.
+    #[test_case]
+    fn passive_close_full_lifecycle() {
+        let mut tcb = established_tcb();
+
+        // Peer closes first.
+        let fin = segment(
+            tcb.rcv_nxt.into(),
+            tcb.snd_nxt.into(),
+            false,
+            true,
+            true,
+            false,
+            &[],
+        );
+        let result = tcb
+            .accept(&TCPPacket::new(fin.as_slice()).unwrap())
+            .unwrap();
+        assert_eq!(tcb.state, State::CloseWait);
+        assert!(result.peer_closed);
+        assert!(
+            !result.destroyed,
+            "CloseWait must not auto-close the connection"
+        );
+
+        // The application only decides to close afterwards.
+        let our_fin = tcb.close().unwrap().expect("expected our own FIN");
+        let our_fin = TCPPacket::new(our_fin.as_slice()).unwrap();
+        assert_eq!(
+            tcb.state,
+            State::LastAck,
+            "closing from CloseWait must move to LastAck, not stay stuck in CloseWait"
+        );
+        assert!(our_fin.fin());
+        assert!(our_fin.ack());
+
+        // Peer ACKs our FIN.
+        let final_ack = segment(
+            tcb.rcv_nxt.into(),
+            tcb.snd_nxt.into(),
+            false,
+            true,
+            false,
+            false,
+            &[],
+        );
+        let result = tcb
+            .accept(&TCPPacket::new(final_ack.as_slice()).unwrap())
+            .unwrap();
+
+        assert_eq!(tcb.state, State::Closed);
+        assert!(result.destroyed);
+    }
+
+    /// Regression test for two bugs found while tracing a real active-close
+    /// sequence: (1) the ACK generated when leaving `FinWait1`/`FinWait2` was
+    /// placed in `AcceptResult.received` instead of `.response` (so it was
+    /// silently never sent), and (2) `rcv_nxt` was not advanced before
+    /// acknowledging the peer's FIN, so the ACK we sent didn't cover the
+    /// FIN's own sequence number and the peer kept retransmitting it.
+    #[test_case]
+    fn active_close_then_peer_fin_full_lifecycle() {
+        let mut tcb = established_tcb();
+
+        // We close first.
+        let our_fin = tcb.close().unwrap().expect("expected our own FIN");
+        let our_fin_seq: u32 = TCPPacket::new(our_fin.as_slice())
+            .unwrap()
+            .sequence()
+            .into();
+        assert_eq!(tcb.state, State::FinWait1);
+
+        // Peer ACKs our FIN (no FIN of their own yet).
+        let ack = segment(
+            tcb.rcv_nxt.into(),
+            our_fin_seq + 1,
+            false,
+            true,
+            false,
+            false,
+            &[],
+        );
+        let result = tcb
+            .accept(&TCPPacket::new(ack.as_slice()).unwrap())
+            .unwrap();
+        assert_eq!(tcb.state, State::FinWait2);
+        assert!(result.response.is_none());
+
+        // Peer now sends its own FIN.
+        let rcv_nxt_before: u32 = tcb.rcv_nxt.into();
+        let peer_fin = segment(rcv_nxt_before, our_fin_seq + 1, false, true, true, false, &[]);
+        let result = tcb
+            .accept(&TCPPacket::new(peer_fin.as_slice()).unwrap())
+            .unwrap();
+
+        assert_eq!(tcb.state, State::Closed);
+        assert!(result.destroyed);
+        let response = result
+            .response
+            .expect("the ACK for the peer's FIN must be sent, not stashed in `received`");
+        let response = TCPPacket::new(response.as_slice()).unwrap();
+        assert_eq!(
+            response.acknowledgment(),
+            Sequence::from(rcv_nxt_before + 1),
+            "a FIN consumes one sequence number: the ACK must cover seq+1, not seq, \
+             or the peer will consider its FIN unacknowledged and retransmit it"
+        );
+    }
+
+    /// Regression test for the simultaneous-close path (both sides send a
+    /// FIN before seeing the other's). As of writing this still fails:
+    /// `Closing -> Closed` (see `accept`) doesn't set `destroyed`, unlike
+    /// every other terminal transition, so the TCB never actually leaves the
+    /// pool once closed this way.
+    #[test_case]
+    fn simultaneous_close_full_lifecycle() {
+        let mut tcb = established_tcb();
+
+        let our_fin = tcb.close().unwrap().expect("expected our own FIN");
+        let our_fin_seq: u32 = TCPPacket::new(our_fin.as_slice())
+            .unwrap()
+            .sequence()
+            .into();
+        assert_eq!(tcb.state, State::FinWait1);
+
+        // Peer's FIN crosses ours on the wire, before ACKing ours.
+        let rcv_nxt_before: u32 = tcb.rcv_nxt.into();
+        let peer_fin = segment(rcv_nxt_before, 0, false, false, true, false, &[]);
+        let result = tcb
+            .accept(&TCPPacket::new(peer_fin.as_slice()).unwrap())
+            .unwrap();
+        assert_eq!(tcb.state, State::Closing);
+        assert!(result.peer_closed);
+
+        // Peer now ACKs our FIN.
+        let final_ack = segment(
+            tcb.rcv_nxt.into(),
+            our_fin_seq + 1,
+            false,
+            true,
+            false,
+            false,
+            &[],
+        );
+        let result = tcb
+            .accept(&TCPPacket::new(final_ack.as_slice()).unwrap())
+            .unwrap();
+
+        assert_eq!(tcb.state, State::Closed);
+        assert!(
+            result.destroyed,
+            "Closing -> Closed must mark the connection as destroyed, like every \
+             other terminal transition, or the TCB leaks in the pool forever"
+        );
     }
 
     #[test_case]
