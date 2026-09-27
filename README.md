@@ -11,7 +11,7 @@
 - [x] UDP echo server
 - [x] DHCP autoconfiguration
 - [x] TCP stack
-- [ ] HTTP server
+- [x] HTTP server
 
 ### Side quests
 
