@@ -71,7 +71,7 @@ impl Socket {
             source: self
                 .listen
                 .address()
-                .or_else(get_my_ipv4_address)
+                .or_else(super::get_my_ipv4_address)
                 .ok_or(SocketError::DHCPNotReady)?,
             destination: address,
             protocol: Protocol::UDP,
@@ -129,7 +129,7 @@ impl Message {
 
     pub async fn send(&self, buffer: &[u8]) -> Result<(), SocketError> {
         tx::send_l3(L3::IPv4 {
-            source: get_my_ipv4_address().ok_or(SocketError::DHCPNotReady)?,
+            source: super::get_my_ipv4_address().ok_or(SocketError::DHCPNotReady)?,
             destination: self.remote_address,
             protocol: Protocol::UDP,
             next: L4::Udp {
@@ -175,11 +175,6 @@ impl ListenerPool {
         }
         handle.waker.wake();
     }
-}
-
-fn get_my_ipv4_address() -> Option<IPv4Address> {
-    let state = STATE_MACHINE.lock();
-    state.arp.identity.map(|id| id.1)
 }
 
 #[cfg(test)]
