@@ -7,6 +7,7 @@ use crate::net::error::BufferTooSmall;
 use crate::net::ipv4::IPv4Packet;
 use crate::net::ipv4::address::IPv4Address;
 use crate::net::ipv4::protocol::Protocol;
+use crate::net::port::Port;
 use crate::net::tcp::sequence::Sequence;
 use crate::net::tcp::{TCP_HEADER, TCPPacket};
 use crate::net::tx::{L3, L4, L7};
@@ -16,9 +17,9 @@ const MY_WINDOW: usize = 4096;
 
 pub struct TransmissionControlBlock {
     local_address: IPv4Address,
-    local_port: u16,
+    local_port: Port,
     remote_address: IPv4Address,
-    remote_port: u16,
+    remote_port: Port,
 
     state: State,
 
@@ -33,7 +34,7 @@ pub struct TransmissionControlBlock {
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-pub struct Id(pub IPv4Address, pub u16, pub IPv4Address, pub u16);
+pub struct Id(pub IPv4Address, pub Port, pub IPv4Address, pub Port);
 
 #[derive(Debug, Default)]
 pub(crate) struct AcceptResult {
@@ -430,11 +431,11 @@ mod tests {
     fn local() -> IPv4Address {
         IPv4Address::new(10, 0, 0, 1)
     }
-    const LOCAL_PORT: u16 = 4242;
+    const LOCAL_PORT: Port = Port::new(4242);
     fn remote() -> IPv4Address {
         IPv4Address::new(10, 0, 0, 2)
     }
-    const REMOTE_PORT: u16 = 1234;
+    const REMOTE_PORT: Port = Port::new(1234);
 
     /// Builds a raw incoming TCP segment (as the remote peer would send it).
     fn segment(

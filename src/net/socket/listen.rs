@@ -1,16 +1,15 @@
-use crate::{
-    net::ipv4::address::{IPv4Address, IPv4AddressParseError},
-    print::colors::Colorable,
-};
+use crate::net::ipv4::address::{IPv4Address, IPv4AddressParseError};
+use crate::net::port::Port;
+use crate::print::colors::Colorable;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub enum Listen {
-    AnyAddress(u16),
-    SpecificAddress(IPv4Address, u16),
+    AnyAddress(Port),
+    SpecificAddress(IPv4Address, Port),
 }
 
 impl Listen {
-    pub fn port(&self) -> u16 {
+    pub fn port(&self) -> Port {
         match self {
             Listen::AnyAddress(port) | Listen::SpecificAddress(_, port) => *port,
         }
@@ -62,8 +61,14 @@ impl core::fmt::Display for Listen {
     }
 }
 
+impl From<Port> for Listen {
+    fn from(port: Port) -> Self {
+        Self::AnyAddress(port)
+    }
+}
+
 impl From<u16> for Listen {
     fn from(port: u16) -> Self {
-        Self::AnyAddress(port)
+        Self::from(Into::<Port>::into(port))
     }
 }

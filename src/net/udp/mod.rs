@@ -1,4 +1,6 @@
-use crate::{net::error::BufferTooSmall, print::colors::Colorable};
+use crate::net::error::BufferTooSmall;
+use crate::net::port::Port;
+use crate::print::colors::Colorable;
 
 mod field {
     pub const SOURCE: core::ops::Range<usize> = 0..2;
@@ -36,16 +38,12 @@ impl<T: AsRef<[u8]>> UDPPacket<T> {
         self.buffer
     }
 
-    pub fn source(&self) -> u16 {
-        let mut destination = [0; size_of::<u16>()];
-        destination.copy_from_slice(&self.buffer.as_ref()[field::SOURCE]);
-        u16::from_be_bytes(destination)
+    pub fn source(&self) -> Port {
+        Port::from_bytes(&self.buffer.as_ref()[field::SOURCE])
     }
 
-    pub fn destination(&self) -> u16 {
-        let mut destination = [0; size_of::<u16>()];
-        destination.copy_from_slice(&self.buffer.as_ref()[field::DESTINATION]);
-        u16::from_be_bytes(destination)
+    pub fn destination(&self) -> Port {
+        Port::from_bytes(&self.buffer.as_ref()[field::DESTINATION])
     }
 
     pub fn packet_length(&self) -> usize {
@@ -62,13 +60,13 @@ impl<T: AsRef<[u8]>> UDPPacket<T> {
 }
 
 impl<T: AsRef<[u8]> + AsMut<[u8]>> UDPPacket<T> {
-    pub fn set_source(&mut self, source_port: u16) -> &mut Self {
-        self.buffer.as_mut()[field::SOURCE].copy_from_slice(&source_port.to_be_bytes());
+    pub fn set_source(&mut self, source_port: Port) -> &mut Self {
+        self.buffer.as_mut()[field::SOURCE].copy_from_slice(&source_port.to_bytes());
         self
     }
 
-    pub fn set_destination(&mut self, destination_port: u16) -> &mut Self {
-        self.buffer.as_mut()[field::DESTINATION].copy_from_slice(&destination_port.to_be_bytes());
+    pub fn set_destination(&mut self, destination_port: Port) -> &mut Self {
+        self.buffer.as_mut()[field::DESTINATION].copy_from_slice(&destination_port.to_bytes());
         self
     }
 

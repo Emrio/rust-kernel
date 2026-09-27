@@ -9,6 +9,7 @@ use crate::net::handle::Handle;
 use crate::net::ipv4::IPv4Packet;
 use crate::net::ipv4::address::IPv4Address;
 use crate::net::ipv4::protocol::Protocol;
+use crate::net::port::Port;
 use crate::net::socket::listen::Listen;
 use crate::net::tx::{L3, L4, L7, NetworkError};
 use crate::net::udp::UDPPacket;
@@ -64,7 +65,7 @@ impl Socket {
     pub async fn send(
         &self,
         address: IPv4Address,
-        port: u16,
+        port: Port,
         payload: Vec<u8>,
     ) -> Result<(), SocketError> {
         tx::send_l3(L3::IPv4 {
@@ -93,9 +94,9 @@ impl Drop for Socket {
 }
 
 pub struct Message {
-    local_port: u16,
+    local_port: Port,
     remote_address: IPv4Address,
-    remote_port: u16,
+    remote_port: Port,
     payload: Vec<u8>,
 }
 
@@ -119,7 +120,7 @@ impl Message {
         self.remote_address
     }
 
-    pub fn remote_port(&self) -> u16 {
+    pub fn remote_port(&self) -> Port {
         self.remote_port
     }
 
@@ -181,11 +182,11 @@ impl ListenerPool {
 mod tests {
     use super::*;
 
-    fn message(local_port: u16, payload: &[u8]) -> Message {
+    fn message(local_port: Port, payload: &[u8]) -> Message {
         Message {
             local_port,
             remote_address: IPv4Address::new(10, 0, 0, 2),
-            remote_port: 1234,
+            remote_port: Port::new(1234),
             payload: payload.to_vec(),
         }
     }
@@ -194,33 +195,33 @@ mod tests {
     fn message_is_delivered_to_the_matching_listener() {
         let mut pool = ListenerPool::default();
         let handle = Arc::new(Handle::new(4));
-        pool.add(Listen::AnyAddress(4242), handle.clone());
+        pool.add(Listen::AnyAddress(Port::new(4242)), handle.clone());
 
-        pool.accept(message(4242, b"hello"));
+        pool.accept(message(Port::new(4242), b"hello"));
 
         let received = handle.queue.pop().expect("expected a queued message");
         assert_eq!(received.payload(), b"hello");
-        assert_eq!(received.remote_port(), 1234);
+        assert_eq!(received.remote_port(), Port::new(1234));
     }
 
     #[test_case]
     fn message_for_unknown_port_is_dropped_without_panicking() {
         let mut pool = ListenerPool::default();
         let handle = Arc::new(Handle::new(4));
-        pool.add(Listen::AnyAddress(4242), handle);
+        pool.add(Listen::AnyAddress(Port::new(4242)), handle);
 
         // Nobody is listening on 9999 -- must not panic, just silently drop.
-        pool.accept(message(9999, b"nope"));
+        pool.accept(message(Port::new(9999), b"nope"));
     }
 
     #[test_case]
     fn removed_listener_no_longer_receives_messages() {
         let mut pool = ListenerPool::default();
         let handle = Arc::new(Handle::new(4));
-        pool.add(Listen::AnyAddress(4242), handle.clone());
-        pool.remove(&Listen::AnyAddress(4242));
+        pool.add(Listen::AnyAddress(Port::new(4242)), handle.clone());
+        pool.remove(&Listen::AnyAddress(Port::new(4242)));
 
-        pool.accept(message(4242, b"late"));
+        pool.accept(message(Port::new(4242), b"late"));
 
         assert!(handle.queue.pop().is_none());
     }
@@ -229,10 +230,10 @@ mod tests {
     fn full_queue_drops_the_message_without_panicking() {
         let mut pool = ListenerPool::default();
         let handle = Arc::new(Handle::new(1));
-        pool.add(Listen::AnyAddress(4242), handle.clone());
+        pool.add(Listen::AnyAddress(Port::new(4242)), handle.clone());
 
-        pool.accept(message(4242, b"first"));
-        pool.accept(message(4242, b"second")); // capacity is 1: must be dropped, not panic
+        pool.accept(message(Port::new(4242), b"first"));
+        pool.accept(message(Port::new(4242), b"second")); // capacity is 1: must be dropped, not panic
 
         let received = handle.queue.pop().unwrap();
         assert_eq!(received.payload(), b"first");

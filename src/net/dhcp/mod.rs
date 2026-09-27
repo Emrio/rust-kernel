@@ -31,8 +31,10 @@ mod field {
 }
 
 pub mod ports {
-    pub const SERVER: u16 = 67;
-    pub const CLIENT: u16 = 68;
+    use crate::net::port::Port;
+
+    pub const SERVER: Port = Port::new(67);
+    pub const CLIENT: Port = Port::new(68);
 }
 
 pub struct DHCPPacket<T: AsRef<[u8]>> {

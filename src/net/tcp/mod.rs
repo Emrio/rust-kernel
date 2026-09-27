@@ -6,6 +6,7 @@ use core::ops::Not;
 
 use crate::net::error::BufferTooSmall;
 use crate::net::ipv4::address::IPv4Address;
+use crate::net::port::Port;
 use crate::net::tcp::header::compute_checksum;
 use crate::net::tcp::sequence::Sequence;
 use crate::print::colors::Colorable;
@@ -62,20 +63,12 @@ impl<T: AsRef<[u8]>> TCPPacket<T> {
         self.buffer
     }
 
-    pub fn source(&self) -> u16 {
-        u16::from_be_bytes(
-            self.buffer.as_ref()[field::SOURCE]
-                .try_into()
-                .expect("SOURCE to be 2 bytes"),
-        )
+    pub fn source(&self) -> Port {
+        Port::from_bytes(&self.buffer.as_ref()[field::SOURCE])
     }
 
-    pub fn destination(&self) -> u16 {
-        u16::from_be_bytes(
-            self.buffer.as_ref()[field::DESTINATION]
-                .try_into()
-                .expect("DESTINATION to be 2 bytes"),
-        )
+    pub fn destination(&self) -> Port {
+        Port::from_bytes(&self.buffer.as_ref()[field::DESTINATION])
     }
 
     pub fn sequence(&self) -> Sequence {
@@ -163,13 +156,13 @@ impl<T: AsRef<[u8]>> TCPPacket<T> {
 }
 
 impl<T: AsRef<[u8]> + AsMut<[u8]>> TCPPacket<T> {
-    pub fn set_source(&mut self, source_port: u16) -> &mut Self {
-        self.buffer.as_mut()[field::SOURCE].copy_from_slice(&source_port.to_be_bytes());
+    pub fn set_source(&mut self, source_port: Port) -> &mut Self {
+        self.buffer.as_mut()[field::SOURCE].copy_from_slice(&source_port.to_bytes());
         self
     }
 
-    pub fn set_destination(&mut self, destination_port: u16) -> &mut Self {
-        self.buffer.as_mut()[field::DESTINATION].copy_from_slice(&destination_port.to_be_bytes());
+    pub fn set_destination(&mut self, destination_port: Port) -> &mut Self {
+        self.buffer.as_mut()[field::DESTINATION].copy_from_slice(&destination_port.to_bytes());
         self
     }
 

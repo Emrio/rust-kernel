@@ -16,6 +16,7 @@ pub mod device;
 pub mod error;
 mod handle;
 pub mod pong;
+mod port;
 pub mod rx;
 pub mod socket;
 mod tx;

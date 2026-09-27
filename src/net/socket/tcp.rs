@@ -17,6 +17,7 @@ use crate::net::handle::Handle;
 use crate::net::ipv4::IPv4Packet;
 use crate::net::ipv4::address::IPv4Address;
 use crate::net::ipv4::protocol::Protocol;
+use crate::net::port::Port;
 use crate::net::socket::listen::Listen;
 use crate::net::tcp::TCPPacket;
 use crate::net::tcp::protocol::AcceptResult;
@@ -120,8 +121,9 @@ impl Socket {
 
     pub async fn connect(
         remote_address: IPv4Address,
-        remote_port: u16,
+        remote_port: impl Into<Port>,
     ) -> Result<Connection, ConnectError> {
+        let remote_port = remote_port.into();
         klog!(
             "tcp",
             "Connecting to ",
@@ -131,7 +133,7 @@ impl Socket {
         );
 
         let local_address = super::get_my_ipv4_address().ok_or(ConnectError::UnconfiguredIpv4)?;
-        let local_port = u16::random() | 4096;
+        let local_port = Port::new(u16::random() | 4096);
 
         let id = Id(local_address, local_port, remote_address, remote_port);
         let connection = Connection::new(id);
@@ -271,7 +273,7 @@ impl Connection {
         self.id.2
     }
 
-    pub fn remote_port(&self) -> u16 {
+    pub fn remote_port(&self) -> Port {
         self.id.3
     }
 
@@ -563,11 +565,11 @@ mod tests {
     fn local() -> IPv4Address {
         IPv4Address::new(10, 0, 0, 1)
     }
-    const LOCAL_PORT: u16 = 4242;
+    const LOCAL_PORT: Port = Port::new(4242);
     fn remote() -> IPv4Address {
         IPv4Address::new(10, 0, 0, 2)
     }
-    const REMOTE_PORT: u16 = 1234;
+    const REMOTE_PORT: Port = Port::new(1234);
 
     /// Builds a raw incoming TCP segment (as the remote peer would send it).
     #[allow(clippy::too_many_arguments)]

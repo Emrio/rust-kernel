@@ -21,6 +21,7 @@ use crate::net::ipv4::address::IPv4Address;
 use crate::net::ipv4::protocol::Protocol;
 use crate::net::ipv4::ttl::TimeToLive;
 use crate::net::ipv4::{IPV4_PACKET, IPv4Packet};
+use crate::net::port::Port;
 use crate::net::rx::NetContext;
 use crate::net::socket::TCPError;
 use crate::net::tcp::sequence::Sequence;
@@ -218,13 +219,13 @@ impl<'a> L3Frame<'a> {
 pub(crate) enum L4 {
     Buffer(Vec<u8>),
     Udp {
-        source: u16,
-        destination: u16,
+        source: Port,
+        destination: Port,
         next: L7,
     },
     Tcp {
-        source: u16,
-        destination: u16,
+        source: Port,
+        destination: Port,
         sequence: Sequence,
         acknowledgment: Sequence,
         cwr: bool,
