@@ -27,7 +27,7 @@ use crate::net::tcp::sequence::Sequence;
 use crate::net::tcp::{TCP_HEADER, TCPPacket};
 use crate::net::udp::{UDP_HEADER, UDPPacket};
 use crate::net::{DHCPConfiguration, DHCPStateMachine, STATE_MACHINE};
-use crate::random::random_u32;
+use crate::random::Random;
 
 pub fn generate_echo_reply(
     request_ipv4: &IPv4Packet<&[u8]>,
@@ -55,7 +55,7 @@ pub fn generate_dhcp_discover(ctx: &NetContext) -> L3 {
             destination: dhcp::ports::SERVER,
             next: L7::Dhcp {
                 operation: dhcp::operation::Operation::BootRequest,
-                xid: random_u32(),
+                xid: u32::random(),
                 hardware_address: ctx.hardware_address(),
                 options: vec![
                     DHCPOption::MessageType(dhcp::option::MessageType::Discover),

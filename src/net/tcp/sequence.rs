@@ -1,11 +1,11 @@
-use crate::random::random_u32;
+use crate::random::Random;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Sequence(u32);
 
 impl Sequence {
     pub fn random() -> Self {
-        Self(random_u32())
+        Self(u32::random())
     }
 }
 
