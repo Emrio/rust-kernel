@@ -2,7 +2,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 
 static STATE: AtomicU64 = AtomicU64::new(0);
 
-pub fn random_u32() -> u32 {
+pub fn random_u64() -> u64 {
     let mut state = STATE.load(Ordering::Relaxed);
 
     if state == 0 {
@@ -16,5 +16,13 @@ pub fn random_u32() -> u32 {
 
     STATE.store(state, Ordering::Relaxed);
 
-    state as u32
+    state
+}
+
+pub fn random_u32() -> u32 {
+    random_u64() as u32
+}
+
+pub fn random_u16() -> u16 {
+    random_u64() as u16
 }
