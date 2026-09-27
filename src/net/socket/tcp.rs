@@ -7,6 +7,8 @@ use alloc::vec::Vec;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
 use core::task::Poll;
+use core::time::Duration;
+
 use futures_util::task::AtomicWaker;
 use lazy_static::lazy_static;
 
@@ -24,6 +26,86 @@ use crate::net::tx::L3;
 use crate::net::tx::L4;
 use crate::net::tx::NetworkError;
 use crate::print::colors::Colorable;
+use crate::random::Random;
+use crate::time::Instant;
+
+#[derive(Debug)]
+pub enum ConnectError {
+    UnconfiguredIpv4,
+    TimedOut,
+    Refused,
+    NetworkError(NetworkError),
+}
+
+struct ConnectionInitiation {
+    connection: Option<Connection>,
+    initiated_at: Instant,
+}
+
+impl ConnectionInitiation {
+    fn is_ready(&self) -> bool {
+        self.connection
+            .as_ref()
+            .unwrap()
+            .stream
+            .established
+            .load(Ordering::Acquire)
+    }
+
+    fn is_refused(&self) -> bool {
+        self.connection
+            .as_ref()
+            .unwrap()
+            .stream
+            .closed
+            .load(Ordering::Acquire)
+    }
+
+    fn check(&mut self) -> Option<Result<Connection, ConnectError>> {
+        if self.is_ready() {
+            return Some(Ok(self.connection.take().expect("polled after completion")));
+        }
+
+        if self.is_refused() {
+            return Some(Err(ConnectError::Refused));
+        }
+
+        if Instant::now() - self.initiated_at > Duration::from_secs(30) {
+            // TODO: cleanup ?
+            return Some(Err(ConnectError::TimedOut));
+        }
+
+        None
+    }
+}
+
+impl Future for ConnectionInitiation {
+    type Output = Result<Connection, ConnectError>;
+
+    fn poll(
+        mut self: core::pin::Pin<&mut Self>,
+        cx: &mut core::task::Context<'_>,
+    ) -> Poll<Self::Output> {
+        let mut this = self.as_mut();
+
+        if let Some(result) = this.check() {
+            return Poll::Ready(result);
+        }
+
+        this.connection
+            .as_ref()
+            .unwrap()
+            .stream
+            .waker
+            .register(cx.waker());
+
+        if let Some(result) = this.check() {
+            return Poll::Ready(result);
+        }
+
+        Poll::Pending
+    }
+}
 
 pub struct Socket;
 
@@ -36,8 +118,36 @@ impl Socket {
         BoundSocket { listen, handle }
     }
 
-    pub fn connect(_address: IPv4Address, _port: u16) -> Connection {
-        unimplemented!()
+    pub async fn connect(
+        remote_address: IPv4Address,
+        remote_port: u16,
+    ) -> Result<Connection, ConnectError> {
+        klog!(
+            "tcp",
+            "Connecting to ",
+            remote_address.green(),
+            ":",
+            remote_port.blue()
+        );
+
+        let local_address = super::get_my_ipv4_address().ok_or(ConnectError::UnconfiguredIpv4)?;
+        let local_port = u16::random() | 4096;
+
+        let id = Id(local_address, local_port, remote_address, remote_port);
+        let connection = Connection::new(id);
+
+        let l3 = STATE_MACHINE
+            .lock()
+            .tcp
+            .initiate(id, connection.stream.clone());
+
+        tx::send_l3(l3).await.map_err(ConnectError::NetworkError)?;
+
+        ConnectionInitiation {
+            connection: Some(connection),
+            initiated_at: Instant::now(),
+        }
+        .await
     }
 }
 
@@ -89,6 +199,7 @@ struct ByteStream {
     waker: AtomicWaker,
     closed: AtomicBool,
     peer_closed: AtomicBool,
+    established: AtomicBool,
 }
 
 pub struct Connection {
@@ -151,6 +262,7 @@ impl Connection {
                 waker: AtomicWaker::new(),
                 closed: AtomicBool::new(false),
                 peer_closed: AtomicBool::new(false),
+                established: AtomicBool::new(false),
             }),
         }
     }
@@ -340,6 +452,11 @@ impl ConnectionPool {
                     stream.waker.wake();
                 }
 
+                if result.established {
+                    stream.established.store(true, Ordering::Release);
+                    stream.waker.wake();
+                }
+
                 ConnectionStatus::Established(tcb, stream)
             }
             connection => connection,
@@ -379,6 +496,19 @@ impl ConnectionPool {
             next,
         })
     }
+
+    fn initiate(&mut self, id: Id, stream: Arc<ByteStream>) -> L3 {
+        let (connection, next) = TransmissionControlBlock::initiate(id);
+        self.connections
+            .insert(id, ConnectionStatus::Established(connection, stream));
+
+        L3::IPv4 {
+            source: id.0,
+            destination: id.2,
+            protocol: Protocol::TCP,
+            next,
+        }
+    }
 }
 
 lazy_static! {
@@ -414,7 +544,9 @@ pub async fn handle_pending_closes() {
 
         let pending_closes = PENDING_CLOSES.lock();
         while let Some(id) = pending_closes.queue.pop() {
-            let _ = close(id).await;
+            if let Err(err) = close(id).await {
+                kprintln!("handle_pending_closes: Failed to close connection {id:?}: {err:?}")
+            }
         }
     }
 }

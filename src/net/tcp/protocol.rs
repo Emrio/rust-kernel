@@ -47,6 +47,7 @@ pub(crate) struct AcceptResult {
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum State {
     Listen,
+    SynSent,
     SynReceived,
     Established,
     CloseWait,
@@ -67,17 +68,12 @@ macro_rules! serv {
 }
 
 impl TransmissionControlBlock {
-    pub fn new(
-        local_address: IPv4Address,
-        local_port: u16,
-        remote_address: IPv4Address,
-        remote_port: u16,
-    ) -> Self {
+    pub fn new(id: Id) -> Self {
         Self {
-            local_address,
-            local_port,
-            remote_address,
-            remote_port,
+            local_address: id.0,
+            local_port: id.1,
+            remote_address: id.2,
+            remote_port: id.3,
             state: State::Listen,
             snd_una: 0.into(),
             snd_nxt: 0.into(),
@@ -179,6 +175,21 @@ impl TransmissionControlBlock {
             self.snd_nxt = self.iss + 1;
             return Ok(AcceptResult {
                 response: Some(self.generate_syn_ack()),
+                ..Default::default()
+            });
+        }
+
+        if self.state == State::SynSent
+            && packet.syn()
+            && packet.ack()
+            && packet.acknowledgment() == self.snd_nxt
+        {
+            klog!(serv!(self), "Connection established");
+            self.state = State::Established;
+            self.irs = packet.sequence();
+            self.rcv_nxt = self.irs + 1;
+            return Ok(AcceptResult {
+                established: true,
                 ..Default::default()
             });
         }
@@ -313,7 +324,7 @@ impl TransmissionControlBlock {
         self.state = match self.state {
             State::SynReceived | State::Established => State::FinWait1,
             State::CloseWait => State::LastAck,
-            State::Listen | State::Closed => State::Closed,
+            State::SynSent | State::Listen | State::Closed => State::Closed,
             state => state,
         };
 
@@ -339,11 +350,40 @@ impl TransmissionControlBlock {
         self.snd_nxt += payload.len() as u32;
         Ok(buffer)
     }
+
+    fn generate_syn(&self) -> L4 {
+        L4::Tcp {
+            source: self.local_port,
+            destination: self.remote_port,
+            sequence: self.iss,
+            acknowledgment: self.rcv_nxt,
+            cwr: false,
+            ece: false,
+            urg: false,
+            ack: false,
+            psh: false,
+            rst: false,
+            syn: true,
+            fin: false,
+            window: MY_WINDOW as u16,
+            next: L7::Empty,
+        }
+    }
+
+    pub(crate) fn initiate(id: Id) -> (Self, L4) {
+        let mut this = Self::new(id);
+        this.state = State::SynSent;
+        this.iss = Sequence::random();
+        this.snd_una = this.iss;
+        this.snd_nxt = this.iss + 1;
+        let syn = this.generate_syn();
+        (this, syn)
+    }
 }
 
 impl From<Id> for TransmissionControlBlock {
     fn from(value: Id) -> Self {
-        Self::new(value.0, value.1, value.2, value.3)
+        Self::new(value)
     }
 }
 
@@ -425,7 +465,7 @@ mod tests {
     }
 
     fn new_tcb() -> TransmissionControlBlock {
-        TransmissionControlBlock::new(local(), LOCAL_PORT, remote(), REMOTE_PORT)
+        TransmissionControlBlock::new(Id(local(), LOCAL_PORT, remote(), REMOTE_PORT))
     }
 
     /// Drives a fresh TCB through the 3-way handshake (client ISS = 1000) and
