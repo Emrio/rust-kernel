@@ -3,6 +3,7 @@ pub mod listen;
 mod tcp;
 mod udp;
 
+pub use tcp::BoundSocket as TCPBoundSocket;
 pub use tcp::ConnectionPool as TCPConnectionPool;
 pub use tcp::Error as TCPError;
 pub use tcp::Socket as TCPSocket;

@@ -15,6 +15,7 @@ pub mod checksum;
 pub mod device;
 pub mod error;
 mod handle;
+pub mod http;
 pub mod pong;
 mod port;
 pub mod rx;
